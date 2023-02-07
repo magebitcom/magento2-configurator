@@ -1,16 +1,19 @@
 <?php
 
+declare(strict_types=1);
+
 namespace CtiDigital\Configurator\Model;
 
 use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\FileComponentInterface;
 use CtiDigital\Configurator\Api\ComponentListInterface;
+use CtiDigital\Configurator\Api\FileComponentInterface;
 use CtiDigital\Configurator\Api\LoggerInterface;
 use CtiDigital\Configurator\Exception\ComponentException;
 use Exception;
-use Symfony\Component\Yaml\Parser;
-use Magento\Framework\App\State;
 use Magento\Framework\App\Area;
+use Magento\Framework\App\State;
+use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Yaml\Parser;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -21,9 +24,12 @@ use Symfony\Component\Yaml\Yaml;
  */
 class Processor
 {
-    const SOURCE_YAML = 'yaml';
-    const SOURCE_CSV = 'csv';
-    const SOURCE_JSON = 'json';
+    public const MODE_MAINTAIN = 'maintain';
+    public const MODE_CREATE = 'create';
+
+    public const SOURCE_YAML = 'yaml';
+    public const SOURCE_CSV = 'csv';
+    public const SOURCE_JSON = 'json';
 
     /**
      * @var string
@@ -71,7 +77,10 @@ class Processor
         $this->log = $logging;
     }
 
-    public function getLogger()
+    /**
+     * @return LoggerInterface
+     */
+    public function getLogger(): LoggerInterface
     {
         return $this->log;
     }
@@ -80,7 +89,7 @@ class Processor
      * @param bool $setting
      * @return void
      */
-    public function setIgnoreMissingFiles($setting)
+    public function setIgnoreMissingFiles($setting): void
     {
         $this->ignoreMissingFiles = $setting;
     }
@@ -88,7 +97,7 @@ class Processor
     /**
      * @return bool
      */
-    public function isIgnoreMissingFiles()
+    public function isIgnoreMissingFiles(): bool
     {
         return $this->ignoreMissingFiles;
     }
@@ -97,7 +106,7 @@ class Processor
      * @param string $componentName
      * @return Processor
      */
-    public function addComponent($componentName)
+    public function addComponent($componentName): self
     {
         $this->components[$componentName] = $componentName;
         return $this;
@@ -106,7 +115,7 @@ class Processor
     /**
      * @return array
      */
-    public function getComponents()
+    public function getComponents(): array
     {
         return $this->components;
     }
@@ -115,7 +124,7 @@ class Processor
      * @param string $environment
      * @return Processor
      */
-    public function setEnvironment($environment)
+    public function setEnvironment($environment): self
     {
         $this->environment = $environment;
         return $this;
@@ -124,7 +133,7 @@ class Processor
     /**
      * @return string
      */
-    public function getEnvironment()
+    public function getEnvironment(): string
     {
         return $this->environment;
     }
@@ -132,7 +141,7 @@ class Processor
     /**
      * Run the components individually
      */
-    public function run()
+    public function run(): void
     {
         // If the components list is empty, then the user would want to run all components in the master.yaml
         if (empty($this->components)) {
@@ -143,7 +152,11 @@ class Processor
         $this->runIndividualComponents();
     }
 
-    private function runIndividualComponents()
+    /**
+     * @return void
+     * @throws Exception
+     */
+    private function runIndividualComponents(): void
     {
         try {
             // Get the master yaml
@@ -172,7 +185,11 @@ class Processor
         }
     }
 
-    private function runAllComponents()
+    /**
+     * @return void
+     * @throws Exception
+     */
+    private function runAllComponents(): void
     {
         try {
             // Get the master yaml
@@ -198,8 +215,9 @@ class Processor
      *
      * @SuppressWarnings(PHPMD.CyclomaticComplexity)
      * @SuppressWarnings(PHPMD.NPathComplexity)
+     * @throws Exception
      */
-    public function runComponent($componentAlias, $componentConfig)
+    public function runComponent($componentAlias, $componentConfig): void
     {
         $this->log->logComment("");
         $this->log->logComment(str_pad("----------------------", (22 + strlen($componentAlias)), "-"));
@@ -211,13 +229,15 @@ class Processor
 
         $sourceType = (isset($componentConfig['type']) === true) ? $componentConfig['type'] : null;
 
+        $mode = $componentConfig['env'][$this->getEnvironment()]['mode'] ?? self::MODE_MAINTAIN;
+
         if (isset($componentConfig['sources'])) {
             foreach ($componentConfig['sources'] as $source) {
                 try {
                     $sourceData = ($component instanceof FileComponentInterface) ?
                         $source :
                         $this->parseData($source, $sourceType);
-                    $component->execute($sourceData);
+                    $component->execute($sourceData, $mode);
                 } catch (ComponentException $e) {
                     if ($this->isIgnoreMissingFiles() === true) {
                         $this->log->logInfo("Skipping file {$source} as it could not be found.");
@@ -268,7 +288,7 @@ class Processor
             try {
                 $sourceType = (isset($componentConfig['type']) === true) ? $componentConfig['type'] : null;
                 $sourceData = $this->parseData($source, $sourceType);
-                $component->execute($sourceData);
+                $component->execute($sourceData, $mode);
             } catch (ComponentException $e) {
                 if ($this->isIgnoreMissingFiles() === true) {
                     $this->log->logInfo("Skipping file {$source} as it could not be found.");
@@ -282,7 +302,7 @@ class Processor
     /**
      * @return array
      */
-    private function getMasterYaml()
+    private function getMasterYaml(): array
     {
         // Read master yaml
         $masterPath = BP . '/app/etc/master.yaml';
@@ -308,9 +328,9 @@ class Processor
      * @param $componentName
      * @return bool
      */
-    private function isValidComponent($componentName)
+    private function isValidComponent($componentName): bool
     {
-        if ($this->log->getLogLevel() > \Symfony\Component\Console\Output\OutputInterface::VERBOSITY_NORMAL) {
+        if ($this->log->getLogLevel() > OutputInterface::VERBOSITY_NORMAL) {
             $this->log->logQuestion(sprintf("Does the %s component exist?", $componentName));
         }
         $component = $this->componentList->getComponent($componentName);
@@ -327,7 +347,7 @@ class Processor
      * @param $master
      * @SuppressWarnings(PHPMD)
      */
-    private function validateMasterYaml($master)
+    private function validateMasterYaml($master): void
     {
         try {
             foreach ($master as $componentAlias => $componentConfig) {
@@ -380,7 +400,13 @@ class Processor
         }
     }
 
-    private function parseData($source, $sourceType)
+    /**
+     * @param $source
+     * @param $sourceType
+     * @return mixed
+     * @throws Exception
+     */
+    private function parseData($source, $sourceType): mixed
     {
         if ($this->canParseAndProcess($source) === true) {
             $ext = ($sourceType !== null) ? $sourceType : $this->getExtension($source);
@@ -408,7 +434,7 @@ class Processor
      *
      * @return bool
      */
-    private function canParseAndProcess($source)
+    private function canParseAndProcess($source): bool
     {
         $path = BP . '/' . $source;
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
@@ -421,9 +447,10 @@ class Processor
     }
 
     /**
-     * @return true
+     * @param $source
+     * @return bool
      */
-    public function isSourceRemote($source)
+    public function isSourceRemote($source): bool
     {
         return (filter_var($source, FILTER_VALIDATE_URL) !== false) ? true : false;
     }
@@ -431,9 +458,9 @@ class Processor
     /**
      * @param $source
      * @return string
-     * @throws \Exception
+     * @throws Exception
      */
-    private function getExtension($source)
+    private function getExtension($source): string
     {
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
         $extension = pathinfo($source, PATHINFO_EXTENSION);
@@ -457,10 +484,10 @@ class Processor
 
     /**
      * @param $source
-     * @return array|bool|false|float|int|mixed|string|null
-     * @throws \Exception
+     * @return string|bool|null
+     * @throws Exception
      */
-    private function getData($source)
+    private function getData($source): string|bool|null
     {
         return ($this->isSourceRemote($source) === true) ?
             $this->getRemoteData($source) :
@@ -470,14 +497,14 @@ class Processor
     /**
      * @param $source
      * @return array|bool|false|float|int|mixed|string|null
-     * @throws \Exception
+     * @throws Exception
      */
-    private function getRemoteContentExtension($source)
+    private function getRemoteContentExtension($source): mixed
     {
         try {
             // phpcs:ignore Magento2.Functions.DiscouragedFunction
             $streamContext = stream_context_create(['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]]);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             return '';
         }
 
@@ -493,15 +520,15 @@ class Processor
 
     /**
      * @param $source
-     * @return array|bool|float|int|mixed|string|null
-     * @throws \Exception
+     * @return string|bool
+     * @throws Exception
      */
-    public function getRemoteData($source)
+    public function getRemoteData($source): string|bool
     {
         try {
             // phpcs:ignore Magento2.Functions.DiscouragedFunction
             $streamContext = stream_context_create(['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]]);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             return '';
         }
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
@@ -513,7 +540,7 @@ class Processor
      * @param $source
      * @return mixed
      */
-    private function parseYamlData($source)
+    private function parseYamlData($source): mixed
     {
         return (new Yaml())->parse($source);
     }
@@ -522,14 +549,13 @@ class Processor
      * @param $source
      * @return mixed
      */
-    private function getFileHandle($source)
+    private function getFileHandle($source): mixed
     {
         // Get a handle to the source data, whether it's remote or local
         if ($this->isSourceRemote($source)) {
             try {
                 // phpcs:ignore Magento2.Functions.DiscouragedFunction
-                $streamContext = stream_context_create(['ssl' =>
-                    [
+                $streamContext = stream_context_create(['ssl' => [
                         'verify_peer' => false,
                         'verify_peer_name' => false
                     ]
@@ -549,9 +575,9 @@ class Processor
     /**
      * @param $source
      * @return array
-     * @throws \Exception
+     * @throws Exception
      */
-    private function parseCsvData($source)
+    private function parseCsvData($source): array
     {
         $handle = $this->getFileHandle($source);
 
@@ -581,7 +607,7 @@ class Processor
      * @param $source
      * @return array|bool|float|int|mixed|string|null
      */
-    private function parseJsonData($source)
+    private function parseJsonData($source): mixed
     {
         return json_decode($source);
     }

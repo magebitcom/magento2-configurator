@@ -3,65 +3,73 @@
 namespace CtiDigital\Configurator\Component;
 
 use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
 use CtiDigital\Configurator\Api\LoggerInterface;
+use CtiDigital\Configurator\Exception\ComponentException;
+use CtiDigital\Configurator\Model\Processor;
+use Magento\Config\Model\Config\Backend\Encrypted;
+use Magento\Config\Model\ResourceModel\Config as ConfigResource;
+use Magento\Config\Model\ResourceModel\Config\Data\CollectionFactory as ConfigCollectionFactory;
+use Magento\Framework\App\Config as ScopeConfig;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Encryption\EncryptorInterface;
+use Magento\Framework\Exception\LocalizedException;
 use Magento\Store\Model\StoreFactory;
 use Magento\Store\Model\WebsiteFactory;
-use Magento\Theme\Model\ResourceModel\Theme\Collection;
 use Magento\Theme\Model\ResourceModel\Theme\CollectionFactory;
-use Magento\Config\Model\ResourceModel\Config as ConfigResource;
-use Magento\Framework\App\Config as ScopeConfig;
 
 class Config implements ComponentInterface
 {
-    const PATH_THEME_ID = 'design/theme/theme_id';
-    const ENCRYPTED_MODEL = \Magento\Config\Model\Config\Backend\Encrypted::class;
+    public const PATH_THEME_ID = 'design/theme/theme_id';
+    public const ENCRYPTED_MODEL = Encrypted::class;
 
-    protected $alias = 'config';
-    protected $name = 'Configuration';
-    protected $description = 'Component to set the store/system configuration values';
+    protected string $alias = 'config';
+    protected string $name = 'Configuration';
+    protected string $description = 'Component to set the store/system configuration values';
 
     /**
      * @var ConfigResource
      */
-    protected $configResource;
+    protected ConfigResource $configResource;
 
     /**
      * @var ScopeConfig
      */
-    protected $scopeConfig;
+    protected ScopeConfig $scopeConfig;
 
     /**
      * @var CollectionFactory
      */
-    protected $collectionFactory;
+    protected CollectionFactory $collectionFactory;
 
     /**
      * @var EncryptorInterface
      */
-    protected $encryptor;
+    protected EncryptorInterface $encryptor;
 
     /**
      * @var WebsiteFactory
      */
-    protected $websiteFactory;
+    protected WebsiteFactory $websiteFactory;
 
     /**
      * @var StoreFactory
      */
-    protected $storeFactory;
+    protected StoreFactory $storeFactory;
 
     /**
      * @var LoggerInterface
      */
-    private $log;
+    private LoggerInterface $log;
 
     /**
      * @var ScopeConfig\Initial
      */
-    private $initialConfig;
+    private ScopeConfig\Initial $initialConfig;
+
+    /**
+     * @var ConfigCollectionFactory
+     */
+    private ConfigCollectionFactory $configValueFactory;
 
     /**
      * Config constructor.
@@ -82,8 +90,10 @@ class Config implements ComponentInterface
         EncryptorInterface $encryptor,
         WebsiteFactory $websiteFactory,
         StoreFactory $storeFactory,
-        LoggerInterface $log
+        LoggerInterface $log,
+        ConfigCollectionFactory $configValueFactory
     ) {
+        $this->configValueFactory = $configValueFactory;
         $this->configResource = $configResource;
         $this->scopeConfig = $scopeConfig;
         $this->initialConfig = $initialConfig;
@@ -95,10 +105,12 @@ class Config implements ComponentInterface
     }
 
     /**
-     * @param $data
+     * @param null $data
+     * @param string $mode
      * @SuppressWarnings(PHPMD)
+     * @throws LocalizedException
      */
-    public function execute($data = null) //phpcs:ignore Generic.Metrics.NestingLevel
+    public function execute($data = null, string $mode = Processor::MODE_MAINTAIN): void //phpcs:ignore Generic.Metrics.NestingLevel
     {
         try {
             $validScopes = ['global', 'websites', 'stores'];
@@ -122,7 +134,8 @@ class Config implements ComponentInterface
                         $this->setGlobalConfig(
                             $convertedConfiguration['path'],
                             $convertedConfiguration['value'],
-                            $encryption
+                            $encryption,
+                            $mode
                         );
                     }
                 }
@@ -142,7 +155,8 @@ class Config implements ComponentInterface
                                 $convertedConfiguration['path'],
                                 $convertedConfiguration['value'],
                                 $code,
-                                $encryption
+                                $encryption,
+                                $mode
                             );
                         }
                     }
@@ -164,7 +178,8 @@ class Config implements ComponentInterface
                                 $convertedConfiguration['path'],
                                 $convertedConfiguration['value'],
                                 $code,
-                                $encryption
+                                $encryption,
+                                $mode
                             );
                         }
                     }
@@ -175,7 +190,12 @@ class Config implements ComponentInterface
         }
     }
 
-    private function determineEncryption(array $configuration, $encryption)
+    /**
+     * @param array $configuration
+     * @param int $encryption
+     * @return int
+     */
+    private function determineEncryption(array $configuration, int $encryption): int
     {
         $metaData = $this->initialConfig->getMetadata();
 
@@ -190,14 +210,24 @@ class Config implements ComponentInterface
         return $encryption;
     }
 
-    private function setGlobalConfig($path, $value, $encrypted = 0)
+    /**
+     * Set global store config
+     *
+     * @param string $path
+     * @param string|null $value
+     * @param int $encrypted
+     * @param string $mode
+     * @return void
+     */
+    private function setGlobalConfig(string $path, ?string $value = null, int $encrypted = 0, string $mode = Processor::MODE_MAINTAIN): void
     {
         try {
             // Check existing value, skip if the same
             $scope = ScopeConfigInterface::SCOPE_TYPE_DEFAULT;
-            $existingValue = $this->scopeConfig->getValue($path, $scope);
-            if ($value == $existingValue) {
-                $this->log->logComment(sprintf("Global Config Already: %s = %s", $path, $value));
+            $existingValue = $this->getSetConfigValue($path, $scope, 0);
+
+            if (($existingValue !== false && $value == $existingValue) || ($existingValue && $mode == Processor::MODE_CREATE)) {
+                $this->log->logComment(sprintf("Global Config Already Has Value: %s = %s", $path, $existingValue));
                 return;
             }
 
@@ -213,7 +243,17 @@ class Config implements ComponentInterface
         }
     }
 
-    private function setWebsiteConfig($path, $value, $code, $encrypted = 0)
+    /**
+     * Set config for website
+     *
+     * @param string $path
+     * @param string|null $value
+     * @param string $code
+     * @param int $encrypted
+     * @param string $mode
+     * @return void
+     */
+    private function setWebsiteConfig(string $path, ?string $value, string $code, int $encrypted = 0, string $mode = Processor::MODE_MAINTAIN): void
     {
         try {
             $logNest = 1;
@@ -227,9 +267,9 @@ class Config implements ComponentInterface
             }
 
             // Check existing value, skip if the same
-            $existingValue = $this->scopeConfig->getValue($path, $scope, $code);
-            if ($value == $existingValue) {
-                $this->log->logComment(sprintf("Website '%s' Config Already: %s = %s", $code, $path, $value), $logNest);
+            $existingValue = $this->getSetConfigValue($path, $scope, $code);
+            if (($existingValue !== false && $value == $existingValue) || ($existingValue && $mode == Processor::MODE_CREATE)) {
+                $this->log->logComment(sprintf("Website '%s' Config Already: %s = %s", $code, $path, $existingValue), $logNest);
                 return;
             }
 
@@ -252,7 +292,7 @@ class Config implements ComponentInterface
      *
      * @return array
      */
-    protected function convert(array $configuration)
+    protected function convert(array $configuration): array
     {
         $convertedConfig = $configuration;
         if (isset($convertedConfig['path']) && isset($convertedConfig['value'])) {
@@ -263,7 +303,18 @@ class Config implements ComponentInterface
         return $convertedConfig;
     }
 
-    private function setStoreConfig($path, $value, $code, $encrypted = 0)
+    /**
+     * Set config for store view
+     *
+     * @param string $path
+     * @param string|null $value
+     * @param string $code
+     * @param int $encrypted
+     * @param string $mode
+     * @return void
+     * @throws LocalizedException
+     */
+    private function setStoreConfig(string $path, ?string $value, string $code, int $encrypted = 0, string $mode = Processor::MODE_MAINTAIN): void
     {
         try {
             $logNest = 2;
@@ -276,9 +327,9 @@ class Config implements ComponentInterface
             }
 
             // Check existing value, skip if the same
-            $existingValue = $this->scopeConfig->getValue($path, $scope, $code);
-            if ($value == $existingValue) {
-                $this->log->logComment(sprintf("Store '%s' Config Already: %s = %s", $code, $path, $value), $logNest);
+            $existingValue = $this->getSetConfigValue($path, $scope, $code);
+            if (($existingValue !== false && $value == $existingValue) || ($existingValue && $mode == Processor::MODE_CREATE)) {
+                $this->log->logComment(sprintf("Store '%s' Config Already: %s = %s", $code, $path, $existingValue), $logNest);
                 return;
             }
 
@@ -301,7 +352,7 @@ class Config implements ComponentInterface
      *
      * @return bool
      */
-    public function isConfigTheme($path, $value)
+    public function isConfigTheme($path, $value): bool
     {
         if ($path === self::PATH_THEME_ID && is_int($value) === false) {
             return true;
@@ -316,17 +367,41 @@ class Config implements ComponentInterface
      *
      * @return int
      */
-    public function getThemeIdByPath($themePath)
+    public function getThemeIdByPath($themePath): int
     {
-        /**
-         * @var Collection $themeCollection
-         */
         $themeCollection = $this->collectionFactory->create();
         $theme = $themeCollection->getThemeByFullPath($themePath);
         return $theme->getThemeId();
     }
 
-    private function encrypt($value)
+    /**
+     * Get Already set value in DB for the config
+     *
+     * @param string $path
+     * @param string $scope
+     * @param int $scopeId
+     * @return string|false|null
+     */
+    private function getSetConfigValue(string $path, string $scope, int $scopeId): string|false|null
+    {
+        $config = $this->configValueFactory->create()
+            ->addFieldToFilter('scope', $scope)
+            ->addFieldToFilter('scope_id', $scopeId)
+            ->addFieldToFilter('path', ['eq' => $path])
+            ->getFirstItem();
+
+        if ($config->getId()) {
+            return $config->getValue();
+        }
+
+        return false;
+    }
+
+    /**
+     * @param $value
+     * @return string
+     */
+    private function encrypt($value): string
     {
         return $this->encryptor->encrypt($value);
     }
@@ -334,7 +409,7 @@ class Config implements ComponentInterface
     /**
      * @return string
      */
-    public function getAlias()
+    public function getAlias(): string
     {
         return $this->alias;
     }
@@ -342,7 +417,7 @@ class Config implements ComponentInterface
     /**
      * @return string
      */
-    public function getDescription()
+    public function getDescription(): string
     {
         return $this->description;
     }

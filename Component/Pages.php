@@ -3,71 +3,64 @@
 namespace CtiDigital\Configurator\Component;
 
 use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
 use CtiDigital\Configurator\Api\LoggerInterface;
+use CtiDigital\Configurator\Exception\ComponentException;
+use Exception;
+use Hyva\Theme\Model\ViewModelRegistry;
+use CtiDigital\Configurator\Model\Processor;
+use Magento\Cms\Api\Data\PageInterface;
 use Magento\Cms\Api\Data\PageInterfaceFactory;
 use Magento\Cms\Api\PageRepositoryInterface;
+use Magento\Framework\Escaper;
+use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Store\Api\StoreRepositoryInterface;
-use Magento\Store\Model\StoreManagerInterface;
+use Symfony\Component\Filesystem\Filesystem;
 
+/**
+ * @see \CtiDigital\Configurator\Component\Pages
+ */
 class Pages implements ComponentInterface
 {
-    protected $alias = 'pages';
-    protected $name = 'Pages';
-    protected $description = 'Component to create/maintain pages.';
-    protected $requiredFields = ['title'];
-    protected $defaultValues = ['page_layout' => 'empty', 'is_active' => '1'];
-
-    /** @var PageRepositoryInterface */
-    protected $pageRepository;
-
-    /** @var PageInterfaceFactory */
-    protected $pageFactory;
-
-    /** @var StoreManagerInterface */
-    protected $storeManager;
+    protected string $alias = 'pages';
+    protected string $name = 'Pages';
+    protected string $description = 'Component to create/maintain pages.';
+    protected array $requiredFields = ['title'];
+    protected array $defaultValues = ['page_layout' => 'empty', 'is_active' => '1'];
 
     /**
-     * @var StoreRepositoryInterface
-     */
-    private $storeRepository;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * Pages constructor.
      * @param PageRepositoryInterface $pageRepository
      * @param PageInterfaceFactory $pageFactory
      * @param StoreRepositoryInterface $storeRepository
      * @param LoggerInterface $log
+     * @param Filesystem $filesystem
+     * @param ViewModelRegistry $viewModelRegistry
+     * @param Escaper $escaper
      */
     public function __construct(
-        PageRepositoryInterface $pageRepository,
-        PageInterfaceFactory $pageFactory,
-        StoreRepositoryInterface $storeRepository,
-        LoggerInterface $log
+        private readonly PageRepositoryInterface    $pageRepository,
+        private readonly PageInterfaceFactory       $pageFactory,
+        private readonly StoreRepositoryInterface   $storeRepository,
+        private readonly LoggerInterface            $log,
+        private readonly Filesystem                 $filesystem,
+        private readonly ViewModelRegistry          $viewModelRegistry,
+        private readonly Escaper $escaper
     ) {
-        $this->pageFactory = $pageFactory;
-        $this->pageRepository = $pageRepository;
-        $this->storeRepository = $storeRepository;
-        $this->log = $log;
     }
 
     /**
      * Loop through the data array and process page data
      *
-     * @param $data
+     * @param null $data
+     * @param string $mode
      * @return void
+     * @throws LocalizedException
      */
-    public function execute($data = null)
+    public function execute($data = null, string $mode = Processor::MODE_MAINTAIN): void
     {
         try {
             foreach ($data as $identifier => $data) {
-                $this->processPage($identifier, $data);
+                $this->processPage($identifier, $data, $mode);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -77,13 +70,15 @@ class Pages implements ComponentInterface
     /**
      * Create or update page data
      *
-     * @param $identifier
-     * @param $data
+     * @param string $identifier
+     * @param array $data
+     * @param string $mode
+     * @return void
+     * @throws LocalizedException
      * @SuppressWarnings(PHPMD)
      */
-    protected function processPage($identifier, $data)
+    protected function processPage(string $identifier, array $data, string $mode): void
     {
-
         try {
             foreach ($data['page'] as $pageData) {
                 if (isset($pageData['stores'])) {
@@ -94,9 +89,11 @@ class Pages implements ComponentInterface
                 } else {
                     $pageId = $this->pageFactory->create()->checkIdentifier($identifier, 0);
                 }
-
-                /** @var \Magento\Cms\Api\Data\PageInterface $page */
+                /** @var PageInterface $page */
                 if ($pageId) {
+                    if ($mode === 'create') {
+                        continue;
+                    }
                     $page = $this->pageRepository->getById($pageId);
                 } else {
                     $page = $this->pageFactory->create();
@@ -111,8 +108,31 @@ class Pages implements ComponentInterface
                     // Check if content is from a file source
                     if ($key == "source") {
                         $key = 'content';
-                        // phpcs:ignore Magento2.Functions.DiscouragedFunction
-                        $value = file_get_contents(BP . '/' . $value);
+
+                        $file = BP . '/' . $value;
+
+                        if (!$this->filesystem->exists($file)) {
+                            return;
+                        }
+
+                        // phpcs:disable
+                        ob_start();
+
+                        $dictionary = [
+                            'escaper' => $this->escaper,
+                            'viewModels' => $this->viewModelRegistry
+                        ];
+
+                        try {
+                            extract($dictionary, EXTR_SKIP);
+                            include $file;
+                        } catch (Exception $exception) {
+                            ob_end_clean();
+                            throw $exception;
+                        }
+
+                        $value = ob_get_clean();
+                        // phpcs:enable
                     }
 
                     // Skip stores
@@ -174,7 +194,7 @@ class Pages implements ComponentInterface
      * @param $pageData
      * @throws ComponentException
      */
-    protected function checkRequiredFields($pageData)
+    protected function checkRequiredFields($pageData): void
     {
         foreach ($this->requiredFields as $key) {
             if (!array_key_exists($key, $pageData)) {
@@ -187,7 +207,7 @@ class Pages implements ComponentInterface
      * Add default page data if fields not set
      * @param $pageData
      */
-    protected function setDefaultFields(&$pageData)
+    protected function setDefaultFields(&$pageData): void
     {
         foreach ($this->defaultValues as $key => $value) {
             if (!array_key_exists($key, $pageData)) {
@@ -199,7 +219,7 @@ class Pages implements ComponentInterface
     /**
      * @return string
      */
-    public function getAlias()
+    public function getAlias(): string
     {
         return $this->alias;
     }
@@ -207,7 +227,7 @@ class Pages implements ComponentInterface
     /**
      * @return string
      */
-    public function getDescription()
+    public function getDescription(): string
     {
         return $this->description;
     }

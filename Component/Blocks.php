@@ -5,60 +5,53 @@ namespace CtiDigital\Configurator\Component;
 use CtiDigital\Configurator\Api\ComponentInterface;
 use CtiDigital\Configurator\Exception\ComponentException;
 use CtiDigital\Configurator\Api\LoggerInterface;
+use Exception;
+use Hyva\Theme\Model\ViewModelRegistry;
+use CtiDigital\Configurator\Model\Processor;
 use Magento\Cms\Api\Data\BlockInterfaceFactory;
+use Magento\Cms\Model\Block;
+use Magento\Cms\Model\ResourceModel\Block\Collection;
+use Magento\Framework\Escaper;
+use Magento\Framework\Exception\LocalizedException;
 use Magento\Store\Model\Store;
+use Symfony\Component\Filesystem\Filesystem;
 
 class Blocks implements ComponentInterface
 {
 
-    protected $alias = 'blocks';
-    protected $name = 'Blocks';
-    protected $description = 'Component to create/maintain blocks.';
-
-    /**
-     * @var BlockInterfaceFactory
-     */
-    protected $blockFactory;
-
-    /**
-     * @var \Magento\Store\Model\Store\Interceptor
-     */
-    protected $storeManager;
-
-    /**
-     * @var \Magento\Framework\Api\SearchCriteriaBuilder
-     */
-    protected $searchBuilder;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
+    protected string $alias = 'blocks';
+    protected string $name = 'Blocks';
+    protected string $description = 'Component to create/maintain blocks.';
 
     /**
      * Blocks constructor.
-     * @param LoggerInterface $log
-     * @param ObjectManagerInterface $objectManager
      * @param BlockInterfaceFactory $blockFactory
+     * @param Store $storeManager
+     * @param LoggerInterface $log
+     * @param Filesystem $filesystem
+     * @param ViewModelRegistry $viewModelRegistry
+     * @param Escaper $escaper
      */
     public function __construct(
-        BlockInterfaceFactory $blockFactory,
-        Store $store,
-        LoggerInterface $log
+        private readonly BlockInterfaceFactory $blockFactory,
+        private readonly Store $storeManager,
+        private readonly LoggerInterface $log,
+        private readonly Filesystem $filesystem,
+        private readonly ViewModelRegistry $viewModelRegistry,
+        private readonly Escaper $escaper
     ) {
-        $this->blockFactory = $blockFactory;
-        $this->storeManager = $store;
-        $this->log = $log;
     }
 
     /**
-     * @param $data
+     * @param null $data
+     * @param string $mode
+     * @throws Exception
      */
-    public function execute($data = null)
+    public function execute($data = null, string $mode = Processor::MODE_MAINTAIN): void
     {
         try {
             foreach ($data as $identifier => $data) {
-                $this->processBlock($identifier, $data);
+                $this->processBlock($identifier, $data, $mode);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -66,11 +59,13 @@ class Blocks implements ComponentInterface
     }
 
     /**
-     * @param $identifier
-     * @param $blockData
+     * @param string $identifier
+     * @param array $blockData
+     * @param string $mode
+     * @throws Exception
      * @SuppressWarnings(PHPMD)
      */
-    private function processBlock($identifier, $blockData)
+    private function processBlock(string $identifier, array $blockData, string $mode = Processor::MODE_MAINTAIN): void
     {
         try {
             // Loop through the block data
@@ -102,6 +97,10 @@ class Blocks implements ComponentInterface
                     $block = $this->blockFactory->create();
                     $block->setIdentifier($identifier);
                     $canSave = true;
+                } elseif ($mode === Processor::MODE_CREATE) {
+                    // In create mode we skip modifying block
+                    $this->log->logComment(sprintf("'%s' Block exists, skip modifying it (create mode)", $identifier));
+                    continue;
                 }
 
                 // Loop through each attribute of the data array
@@ -109,9 +108,31 @@ class Blocks implements ComponentInterface
                     // Check if content is from a file source
                     if ($key == "source") {
                         $key = 'content';
-                        //TODO load this with Magento's code, and also check for file existing
-                        // phpcs:ignore Magento2.Functions.DiscouragedFunction
-                        $value = file_get_contents(BP . '/' . $value);
+
+                        $file = BP . '/' . $value;
+
+                        if (!$this->filesystem->exists($file)) {
+                            return;
+                        }
+
+                        // phpcs:disable
+                        ob_start();
+
+                        $dictionary = [
+                            'escaper' => $this->escaper,
+                            'viewModels' => $this->viewModelRegistry
+                        ];
+
+                        try {
+                            extract($dictionary, EXTR_SKIP);
+                            include $file;
+                        } catch (Exception $exception) {
+                            ob_end_clean();
+                            throw $exception;
+                        }
+
+                        $value = ob_get_clean();
+                        // phpcs:enable
                     }
 
                     // Skip stores
@@ -173,15 +194,16 @@ class Blocks implements ComponentInterface
      * Find the block to process given the identifier, block collection and optionally stores
      *
      * @param String $identifier
-     * @param \Magento\Cms\Model\ResourceModel\Block\Collection $blocks
+     * @param Collection $blocks
      * @param array $stores
-     * @return \Magento\Cms\Model\Block|null
+     * @return Block|null
+     * @throws LocalizedException
      */
     private function getBlockToProcess(
-        $identifier,
-        \Magento\Cms\Model\ResourceModel\Block\Collection $blocks,
-        $stores = []
-    ) {
+        string     $identifier,
+        Collection $blocks,
+        array $stores = []
+    ):? Block {
         // If there is only 1 block and stores hasn't been specified
         if ($blocks->count() == 1 && count($stores) == 0) {
             // Return that one block
@@ -208,10 +230,11 @@ class Blocks implements ComponentInterface
     }
 
     /**
-     * @param String $code
-     * @return \Magento\Store\Model\Store
+     * @param string $code
+     * @return Store
+     * @throws LocalizedException
      */
-    private function getStoreByCode($code)
+    private function getStoreByCode(string $code): Store
     {
         // Load the store object
         $store = $this->storeManager->load($code, 'code');
@@ -228,7 +251,7 @@ class Blocks implements ComponentInterface
     /**
      * @return string
      */
-    public function getAlias()
+    public function getAlias(): string
     {
         return $this->alias;
     }
@@ -236,7 +259,7 @@ class Blocks implements ComponentInterface
     /**
      * @return string
      */
-    public function getDescription()
+    public function getDescription(): string
     {
         return $this->description;
     }

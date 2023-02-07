@@ -1,49 +1,55 @@
 <?php
 
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
 use CtiDigital\Configurator\Api\ComponentInterface;
 use CtiDigital\Configurator\Api\LoggerInterface;
 use CtiDigital\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\Processor;
+use Magento\Catalog\Model\Category;
 use Magento\Catalog\Model\CategoryFactory;
-use Magento\Store\Model\GroupFactory;
+use Magento\Cms\Model\BlockFactory;
+use Magento\Cms\Model\ResourceModel\Block as BlockResource;
 use Magento\Framework\App\Filesystem\DirectoryList;
+use Magento\Framework\Exception\FileSystemException;
+use Magento\Store\Model\Group;
+use Magento\Store\Model\GroupFactory;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
  */
 class Categories implements ComponentInterface
 {
-    protected $alias = 'categories';
-    protected $name = 'Categories';
-    protected $description = 'Component to import categories.';
+    protected string $alias = 'categories';
+    protected string $name = 'Categories';
+    protected string $description = 'Component to import categories.';
 
-    /**
-     * @var GroupFactory
-     */
-    private $groupFactory;
+    /** @var GroupFactory */
+    private GroupFactory $groupFactory;
 
-    /**
-     * @var DirectoryList
-     */
-    private $dirList;
+    /** @var DirectoryList */
+    private DirectoryList $dirList;
 
-    /**
-     * @var CategoryFactory
-     */
-    private $category;
+    /** @var CategoryFactory */
+    private CategoryFactory $category;
 
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
+    /** @var LoggerInterface */
+    private LoggerInterface $log;
 
-    private $mainAttributes = [
+    /** @var BlockFactory */
+    private BlockFactory $blockFactory;
+
+    /** @var BlockResource */
+    private BlockResource $blockResource;
+
+    private array $mainAttributes = [
         'name',
         'is_active',
         'position',
         'include_in_menu',
-        'description'
+        'description',
+        'page_layout',
+        'custom_use_parent_settings',
     ];
 
     /**
@@ -52,20 +58,32 @@ class Categories implements ComponentInterface
      * @param GroupFactory $groupFactory
      * @param DirectoryList $dirList
      * @param LoggerInterface $log
+     * @param BlockFactory $blockFactory
+     * @param BlockResource $blockResource
      */
     public function __construct(
         CategoryFactory $category,
         GroupFactory $groupFactory,
         DirectoryList $dirList,
-        LoggerInterface $log
+        LoggerInterface $log,
+        BlockFactory $blockFactory,
+        BlockResource $blockResource
     ) {
         $this->category = $category;
         $this->groupFactory = $groupFactory;
         $this->dirList = $dirList;
         $this->log = $log;
+        $this->blockFactory = $blockFactory;
+        $this->blockResource = $blockResource;
     }
 
-    public function execute($data = null)
+    /**
+     * @param $data
+     * @param string $mode
+     * @return void
+     * @throws FileSystemException
+     */
+    public function execute($data = null, string $mode = Processor::MODE_MAINTAIN): void
     {
         if (isset($data['categories'])) {
             foreach ($data['categories'] as $store) {
@@ -80,7 +98,7 @@ class Categories implements ComponentInterface
                     }
                     if (isset($store['categories'])) {
                         $this->log->logInfo(sprintf('Updating categories for "%s"', $group));
-                        $this->createOrUpdateCategory($category, $store['categories']);
+                        $this->createOrUpdateCategory($category, $store['categories'], $mode);
                     }
                 } catch (ComponentException $e) {
                     $this->log->logError($e->getMessage());
@@ -92,20 +110,19 @@ class Categories implements ComponentInterface
     /**
      * Gets the default category for the store group
      *
-     * @param null $store
-     * @return \Magento\Catalog\Model\Category|bool
+     * @param string|null $store
+     * @return Category|bool
      */
-    public function getDefaultCategory($store = null)
+    public function getDefaultCategory(?string $store = null): Category|bool
     {
         $groupCollection = $this->groupFactory->create()->getCollection()
             ->addFieldToFilter('name', $store);
         if ($groupCollection->getSize() === 1) {
             /**
-             * @var $group \Magento\Store\Model\Group
+             * @var $group Group
              */
             $group = $groupCollection->getFirstItem();
-            $category = $this->category->create()->load($group->getRootCategoryId());
-            return $category;
+            return $this->category->create()->load($group->getRootCategoryId());
         }
         if ($groupCollection->getSize() > 1) {
             throw new ComponentException(
@@ -123,25 +140,33 @@ class Categories implements ComponentInterface
     /**
      * Creates/updates categories with the values in the YAML
      *
+     * @param Category $parentCategory
      * @param array $categories
-     * @param \Magento\Catalog\Model\Category $parentCategory
+     * @param string $mode
+     * @return void
+     * @throws FileSystemException
      * @SuppressWarnings(PHPMD)
-     * @throws \Magento\Framework\Exception\FileSystemException
      */
     public function createOrUpdateCategory(
-        \Magento\Catalog\Model\Category $parentCategory,
-        $categories = []
-    ) {
+        Category $parentCategory,
+        array    $categories = [],
+        string $mode = Processor::MODE_MAINTAIN
+    ): void {
         foreach ($categories as $categoryValues) {
             // Load the category using its name and parent category
             /**
-             * @var $category \Magento\Catalog\Model\Category
+             * @var $category Category
              */
             $category = $this->category->create()->getCollection()
                 ->addFieldToFilter('name', $categoryValues['name'])
                 ->addFieldToFilter('parent_id', $parentCategory->getId())
                 ->setPageSize(1)
                 ->getFirstItem();
+
+            if ($category->getId() && $mode === Processor::MODE_CREATE) {
+                $this->log->logComment(sprintf("Skip category '%s' modification in create mode: ", $categoryValues['name']));
+                continue;
+            }
 
             foreach ($categoryValues as $attribute => $value) {
                 switch ($attribute) {
@@ -168,6 +193,16 @@ class Categories implements ComponentInterface
                         }
 
                         $category->setImage($img);
+                        break;
+                    case 'landing_page':
+                        $block = $this->blockFactory->create()->setStoreId($category->getStoreId());
+                        $this->blockResource->load($block, $value, 'identifier');
+
+                        if (!$block->getIdentifier()) {
+                            break;
+                        }
+
+                        $category->setData($attribute, $block->getId());
                         break;
                     default:
                         $category->setCustomAttribute($attribute, $value);
@@ -201,10 +236,10 @@ class Categories implements ComponentInterface
     }
 
     /**
-     * @param $data
+     * @param array $data
      * @return string
      */
-    private function getStoreGroup($data)
+    private function getStoreGroup(array $data): string
     {
         if (isset($data['store_group']) === true) {
             return $data['store_group'];
@@ -215,7 +250,7 @@ class Categories implements ComponentInterface
     /**
      * @return string
      */
-    public function getAlias()
+    public function getAlias(): string
     {
         return $this->alias;
     }
@@ -223,7 +258,7 @@ class Categories implements ComponentInterface
     /**
      * @return string
      */
-    public function getDescription()
+    public function getDescription(): string
     {
         return $this->description;
     }
