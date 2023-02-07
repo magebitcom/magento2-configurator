@@ -1,11 +1,11 @@
 <?php
 
-namespace Magebit\Configurator\Component;
+namespace CtiDigital\Configurator\Component;
 
 use CtiDigital\Configurator\Api\ComponentInterface;
 use CtiDigital\Configurator\Api\LoggerInterface;
 use CtiDigital\Configurator\Exception\ComponentException;
-use Magebit\Configurator\Model\Processor;
+use CtiDigital\Configurator\Model\Processor;
 use Magento\Catalog\Model\Category;
 use Magento\Catalog\Model\CategoryFactory;
 use Magento\Cms\Model\BlockFactory;
