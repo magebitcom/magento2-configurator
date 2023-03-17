@@ -3,6 +3,7 @@
 namespace CtiDigital\Configurator\Component;
 
 use CtiDigital\Configurator\Api\ComponentInterface;
+use CtiDigital\Configurator\Api\VersionManagementInterface;
 use CtiDigital\Configurator\Exception\ComponentException;
 use CtiDigital\Configurator\Api\LoggerInterface;
 use Exception;
@@ -38,7 +39,8 @@ class Blocks implements ComponentInterface
         private readonly LoggerInterface $log,
         private readonly Filesystem $filesystem,
         private readonly ViewModelRegistry $viewModelRegistry,
-        private readonly Escaper $escaper
+        private readonly Escaper $escaper,
+        private readonly VersionManagementInterface $versionManagement
     ) {
     }
 
@@ -79,6 +81,19 @@ class Blocks implements ComponentInterface
                 $canSave = false;
                 $block = null;
 
+                $version = $data['version'] ?? null;
+                $versionId = $this->alias . '_' . $identifier;
+
+                if (isset($data['stores'])) {
+                    $versionId .= implode('_', $data['stores']);
+                }
+
+                if ($version) {
+                    unset($data['version']);
+                }
+
+                $isNewVersion = isset($version) && $this->versionManagement->isNewVersion($versionId, (int) $version);
+
                 // Check if there are existing blocks
                 if ($blocks->count()) {
                     $stores = [];
@@ -97,7 +112,7 @@ class Blocks implements ComponentInterface
                     $block = $this->blockFactory->create();
                     $block->setIdentifier($identifier);
                     $canSave = true;
-                } elseif ($mode === Processor::MODE_CREATE) {
+                } elseif ($mode === Processor::MODE_CREATE && !$isNewVersion) {
                     // In create mode we skip modifying block
                     $this->log->logComment(sprintf("'%s' Block exists, skip modifying it (create mode)", $identifier));
                     continue;
@@ -183,6 +198,10 @@ class Blocks implements ComponentInterface
                         "Save block %s",
                         $identifier . ' (' . $block->getId() . ')'
                     ));
+                }
+
+                if ($version) {
+                    $this->versionManagement->setVersion($versionId, (int) $version);
                 }
             }
         } catch (ComponentException $e) {

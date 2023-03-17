@@ -10,6 +10,13 @@
     <preference for="CtiDigital\Configurator\Api\ComponentListInterface"
                 type="CtiDigital\Configurator\Component\ComponentList" />
 
+    <preference for="CtiDigital\Configurator\Api\ConfigRepositoryInterface"
+                type="CtiDigital\Configurator\Model\ConfigRepository" />
+    <preference for="CtiDigital\Configurator\Api\Data\ConfigInterface"
+                type="CtiDigital\Configurator\Model\Config" />
+    <preference for="CtiDigital\Configurator\Api\VersionManagementInterface"
+                type="CtiDigital\Configurator\Model\VersionManagement" />
+
     <type name="Magento\Framework\Console\CommandList">
         <arguments>
             <argument name="commands" xsi:type="array">

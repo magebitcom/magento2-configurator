@@ -4,6 +4,7 @@ namespace CtiDigital\Configurator\Component;
 
 use CtiDigital\Configurator\Api\ComponentInterface;
 use CtiDigital\Configurator\Api\LoggerInterface;
+use CtiDigital\Configurator\Api\VersionManagementInterface;
 use CtiDigital\Configurator\Exception\ComponentException;
 use Exception;
 use Hyva\Theme\Model\ViewModelRegistry;
@@ -44,7 +45,8 @@ class Pages implements ComponentInterface
         private readonly LoggerInterface            $log,
         private readonly Filesystem                 $filesystem,
         private readonly ViewModelRegistry          $viewModelRegistry,
-        private readonly Escaper $escaper
+        private readonly Escaper $escaper,
+        private readonly VersionManagementInterface $versionManagement
     ) {
     }
 
@@ -89,9 +91,22 @@ class Pages implements ComponentInterface
                 } else {
                     $pageId = $this->pageFactory->create()->checkIdentifier($identifier, 0);
                 }
+
+                $version = $pageData['version'] ?? null;
+                $versionId = $this->alias . '_' . $identifier;
+
+                if (isset($pageData['stores'])) {
+                    $versionId .= implode('_', $pageData['stores']);
+                }
+
+                if ($version) {
+                    unset($pageData['version']);
+                }
+
                 /** @var PageInterface $page */
                 if ($pageId) {
-                    if ($mode === 'create') {
+                    $isNewVersion = $version && $this->versionManagement->isNewVersion($versionId, (int) $version);
+                    if ($mode === 'create' && !$isNewVersion) {
                         continue;
                     }
                     $page = $this->pageRepository->getById($pageId);
@@ -182,6 +197,11 @@ class Pages implements ComponentInterface
                         "Save page %s",
                         $identifier . ' (' . $page->getId() . ')'
                     ));
+
+                }
+
+                if ($version) {
+                    $this->versionManagement->setVersion($versionId, (int) $version);
                 }
             }
         } catch (NoSuchEntityException $e) {

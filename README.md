@@ -1,4 +1,4 @@
-# Magento 2 Configurator
+# Magento 2 Configurator (Magebit version)
 
 [![Build Status](https://travis-ci.org/ctidigital/magento2-configurator.svg?branch=develop)](https://travis-ci.org/ctidigital/magento2-configurator)
 
@@ -9,6 +9,18 @@ A Magento module initially created by [CTI Digital] to create and maintain datab
   - Share and collaborate configuration with other colleagues using your own versioning system.
   - Keep versions of your configurations using your own versioning system.
   - Split your configuration based on the environment you're developing on.
+
+Adjustments by Magebit
+  - Create/Maintain mode functionality
+    - Currently support these components
+      - Category
+      - CMS Pages/Blocks
+      - Configuration
+  - Better templating system for CMS content to allow for phtml files
+  - Adds version control for Create mode
+    - Currently supports these components
+      - CMS Pages/Blocks
+
 
 If you're interested to find out more about the background of the configurator, watch this lightning talk by [Raj Chevli] at Mage Titans in Manchester on [YouTube].
 
