@@ -21,7 +21,6 @@ Adjustments by Magebit
     - Currently supports these components
       - CMS Pages/Blocks
 
-
 If you're interested to find out more about the background of the configurator, watch this lightning talk by [Raj Chevli] at Mage Titans in Manchester on [YouTube].
 
 This is a work in progress and by no means for use with production environments (and probably not even development environments either just yet).
