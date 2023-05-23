@@ -17,7 +17,7 @@ Adjustments by Magebit
       - CMS Pages/Blocks
       - Configuration
   - Better templating system for CMS content to allow for phtml files
-  - Adds version control for Create mode
+  - Adds version control for Create mode (Usage info: https://github.com/magebitcom/magento2-configurator/wiki/Versioning)
     - Currently supports these components
       - CMS Pages/Blocks
 
