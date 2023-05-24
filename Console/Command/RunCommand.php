@@ -64,7 +64,7 @@ class RunCommand extends Command
     /**
      * @param InputInterface $input
      * @param OutputInterface $output
-     * @return void
+     * @return int
      * @SuppressWarnings(PHPMD)
      */
     protected function execute(InputInterface $input, OutputInterface $output)
@@ -103,8 +103,11 @@ class RunCommand extends Command
             if ($output->getVerbosity() > OutputInterface::VERBOSITY_NORMAL) {
                 $output->writeln('<comment>Finished Configurator</comment>');
             }
+            return 0;
         } catch (\Exception $e) {
             $output->writeln('<error>' . $e->getMessage() . '</error>');
+
+            return 1;
         }
     }
 }

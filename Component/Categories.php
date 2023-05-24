@@ -222,6 +222,8 @@ class Categories implements ComponentInterface
             $category->setAttributeSetId($category->getResource()->getEntityType()->getDefaultAttributeSetId());
             $category->setPath($path);
             $category->setParentId($parentCategory->getId());
+            // Update category in default scope
+            $category->setStoreId(0);
             $category->save();
 
             $this->log->logInfo(
