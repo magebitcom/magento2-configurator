@@ -267,7 +267,7 @@ class Config implements ComponentInterface
             }
 
             // Check existing value, skip if the same
-            $existingValue = $this->getSetConfigValue($path, $scope, $code);
+            $existingValue = $this->getSetConfigValue($path, $scope, $website->getId());
             if (($existingValue !== false && $value == $existingValue) || ($existingValue && $mode == Processor::MODE_CREATE)) {
                 $this->log->logComment(sprintf("Website '%s' Config Already: %s = %s", $code, $path, $existingValue), $logNest);
                 return;
@@ -327,7 +327,7 @@ class Config implements ComponentInterface
             }
 
             // Check existing value, skip if the same
-            $existingValue = $this->getSetConfigValue($path, $scope, $code);
+            $existingValue = $this->getSetConfigValue($path, $scope, $storeView->getId());
             if (($existingValue !== false && $value == $existingValue) || ($existingValue && $mode == Processor::MODE_CREATE)) {
                 $this->log->logComment(sprintf("Store '%s' Config Already: %s = %s", $code, $path, $existingValue), $logNest);
                 return;
