@@ -7,7 +7,6 @@ use CtiDigital\Configurator\Api\LoggerInterface;
 use CtiDigital\Configurator\Api\VersionManagementInterface;
 use CtiDigital\Configurator\Exception\ComponentException;
 use Exception;
-use Hyva\Theme\Model\ViewModelRegistry;
 use CtiDigital\Configurator\Model\Processor;
 use Magento\Cms\Api\Data\PageInterface;
 use Magento\Cms\Api\Data\PageInterfaceFactory;
@@ -15,6 +14,7 @@ use Magento\Cms\Api\PageRepositoryInterface;
 use Magento\Framework\Escaper;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Exception\NoSuchEntityException;
+use Magento\Framework\ObjectManagerInterface;
 use Magento\Store\Api\StoreRepositoryInterface;
 use Symfony\Component\Filesystem\Filesystem;
 
@@ -29,14 +29,17 @@ class Pages implements ComponentInterface
     protected array $requiredFields = ['title'];
     protected array $defaultValues = ['page_layout' => 'empty', 'is_active' => '1'];
 
+    protected $viewModelRegistry = null;
+
     /**
      * @param PageRepositoryInterface $pageRepository
      * @param PageInterfaceFactory $pageFactory
      * @param StoreRepositoryInterface $storeRepository
      * @param LoggerInterface $log
      * @param Filesystem $filesystem
-     * @param ViewModelRegistry $viewModelRegistry
      * @param Escaper $escaper
+     * @param VersionManagementInterface $versionManagement
+     * @param ObjectManagerInterface $objectManager
      */
     public function __construct(
         private readonly PageRepositoryInterface    $pageRepository,
@@ -44,10 +47,13 @@ class Pages implements ComponentInterface
         private readonly StoreRepositoryInterface   $storeRepository,
         private readonly LoggerInterface            $log,
         private readonly Filesystem                 $filesystem,
-        private readonly ViewModelRegistry          $viewModelRegistry,
         private readonly Escaper $escaper,
-        private readonly VersionManagementInterface $versionManagement
+        private readonly VersionManagementInterface $versionManagement,
+        private readonly ObjectManagerInterface $objectManager
     ) {
+        if (class_exists('Hyva\Theme\Model\ViewModelRegistry')) {
+            $this->viewModelRegistry = $this->objectManager->create('Hyva\Theme\Model\ViewModelRegistry');
+        }
     }
 
     /**

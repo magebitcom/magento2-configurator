@@ -7,13 +7,13 @@ use CtiDigital\Configurator\Api\VersionManagementInterface;
 use CtiDigital\Configurator\Exception\ComponentException;
 use CtiDigital\Configurator\Api\LoggerInterface;
 use Exception;
-use Hyva\Theme\Model\ViewModelRegistry;
 use CtiDigital\Configurator\Model\Processor;
 use Magento\Cms\Api\Data\BlockInterfaceFactory;
 use Magento\Cms\Model\Block;
 use Magento\Cms\Model\ResourceModel\Block\Collection;
 use Magento\Framework\Escaper;
 use Magento\Framework\Exception\LocalizedException;
+use Magento\Framework\ObjectManagerInterface;
 use Magento\Store\Model\Store;
 use Symfony\Component\Filesystem\Filesystem;
 
@@ -24,24 +24,30 @@ class Blocks implements ComponentInterface
     protected string $name = 'Blocks';
     protected string $description = 'Component to create/maintain blocks.';
 
+    protected $viewModelRegistry = null;
+
     /**
      * Blocks constructor.
      * @param BlockInterfaceFactory $blockFactory
      * @param Store $storeManager
      * @param LoggerInterface $log
      * @param Filesystem $filesystem
-     * @param ViewModelRegistry $viewModelRegistry
      * @param Escaper $escaper
+     * @param VersionManagementInterface $versionManagement
+     * @param ObjectManagerInterface $objectManager
      */
     public function __construct(
         private readonly BlockInterfaceFactory $blockFactory,
         private readonly Store $storeManager,
         private readonly LoggerInterface $log,
         private readonly Filesystem $filesystem,
-        private readonly ViewModelRegistry $viewModelRegistry,
         private readonly Escaper $escaper,
-        private readonly VersionManagementInterface $versionManagement
+        private readonly VersionManagementInterface $versionManagement,
+        private readonly ObjectManagerInterface $objectManager
     ) {
+        if (class_exists('Hyva\Theme\Model\ViewModelRegistry')) {
+            $this->viewModelRegistry = $this->objectManager->create('Hyva\Theme\Model\ViewModelRegistry');
+        }
     }
 
     /**
