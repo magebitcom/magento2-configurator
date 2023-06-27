@@ -4,7 +4,6 @@ namespace CtiDigital\Configurator\Component;
 use CtiDigital\Configurator\Api\ComponentInterface;
 use CtiDigital\Configurator\Api\LoggerInterface;
 use CtiDigital\Configurator\Exception\ComponentException;
-use FireGento\FastSimpleImport\Model\ImporterFactory;
 use Magento\ImportExport\Model\Import;
 use Magento\Framework\Api\SearchCriteriaBuilder;
 use Magento\Customer\Api\GroupRepositoryInterface;
@@ -25,11 +24,6 @@ class Customers implements ComponentInterface
         '_website',
         '_store',
     ];
-
-    /**
-     * @var ImporterFactory
-     */
-    protected $importerFactory;
 
     /**
      * @var GroupRepositoryInterface
@@ -72,14 +66,12 @@ class Customers implements ComponentInterface
     protected $columnHeaders = [];
 
     public function __construct(
-        ImporterFactory $importerFactory,
         GroupRepositoryInterface $groupRepository,
         GroupManagementInterface $groupManagement,
         SearchCriteriaBuilder $criteriaBuilder,
         IndexerFactory $indexerFactory,
         LoggerInterface $log
     ) {
-        $this->importerFactory = $importerFactory;
         $this->groupRepository = $groupRepository;
         $this->groupManagement = $groupManagement;
         $this->criteriaBuilder = $criteriaBuilder;
@@ -140,20 +132,7 @@ class Customers implements ComponentInterface
             $rowIndex++;
         }
 
-        try {
-            /**
-             * @var $importer \FireGento\FastSimpleImport\Model\Importer
-             */
-            $importer = $this->importerFactory->create();
-            $importer->setEntityCode('customer_composite');
-            $importer->setBehavior(Import::BEHAVIOR_APPEND);
-            $importer->processImport($customerImport);
-            $this->reindex();
-        } catch (\Exception $e) {
-            $this->log->logError($e->getMessage());
-        }
-        $this->log->logInfo($importer->getLogTrace());
-        $this->log->logInfo($importer->getErrorMessages());
+        $this->log->logError('Not Supported without FSI');
     }
 
     /**

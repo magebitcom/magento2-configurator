@@ -4,7 +4,6 @@ namespace CtiDigital\Configurator\Component\Product;
 use CtiDigital\Configurator\Api\LoggerInterface;
 use Magento\Framework\Filesystem;
 use Magento\Framework\App\Filesystem\DirectoryList;
-use FireGento\FastSimpleImport\Helper\Config;
 use Magento\Framework\HTTP\ZendClient;
 use Magento\Framework\HTTP\ZendClientFactory;
 
@@ -26,11 +25,6 @@ class Image
     protected $filesystem;
 
     /**
-     * @var Config
-     */
-    protected $importerConfig;
-
-    /**
      * @var string
      */
     private $separator = ';';
@@ -38,18 +32,15 @@ class Image
     /**
      * Image constructor.
      * @param Filesystem $filesystem
-     * @param Config $importerConfig
      * @param ZendClientFactory $httpClientFactory
      * @param LoggerInterface $log
      */
     public function __construct(
         Filesystem $filesystem,
-        Config $importerConfig,
         ZendClientFactory $httpClientFactory,
         LoggerInterface $log
     ) {
         $this->filesystem = $filesystem;
-        $this->importerConfig = $importerConfig;
         $this->httpClientFactory = $httpClientFactory;
         $this->log = $log;
     }
@@ -207,10 +198,6 @@ class Image
      */
     public function getFileDirectory(\Magento\Framework\Filesystem\Directory\WriteInterface $file)
     {
-        $configurationValue = $this->importerConfig->getImportFileDir();
-        if (!empty($configurationValue)) {
-            return $file->getRelativePath($configurationValue);
-        }
         return $file->getRelativePath('import');
     }
 

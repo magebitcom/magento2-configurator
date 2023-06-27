@@ -6,7 +6,6 @@ use CtiDigital\Configurator\Api\ComponentInterface;
 use CtiDigital\Configurator\Api\LoggerInterface;
 use CtiDigital\Configurator\Component\Product\AttributeOption;
 use CtiDigital\Configurator\Exception\ComponentException;
-use FireGento\FastSimpleImport\Model\ImporterFactory;
 
 /**
  * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
@@ -19,11 +18,6 @@ class TieredPrices implements ComponentInterface
     protected $alias = 'tiered_prices';
     protected $name = 'Tiered Prices';
     protected $description = 'Component to import tiered prices using a CSV file.';
-
-    /**
-     * @var ImporterFactory
-     */
-    protected $importerFactory;
 
     /**
      * @var AttributeOption
@@ -52,16 +46,13 @@ class TieredPrices implements ComponentInterface
 
     /**
      * TieredPrices constructor.
-     * @param ImporterFactory $importerFactory
      * @param AttributeOption $attributeOption
      * @param LoggerInterface $log
      */
     public function __construct(
-        ImporterFactory $importerFactory,
         AttributeOption $attributeOption,
         LoggerInterface $log
     ) {
-        $this->importerFactory = $importerFactory;
         $this->attributeOption = $attributeOption;
         $this->log = $log;
     }
@@ -112,16 +103,7 @@ class TieredPrices implements ComponentInterface
         }
 
         $this->log->logInfo(sprintf('Attempting to import %s rows', count($this->successPrices)));
-        try {
-            $import = $this->importerFactory->create();
-            $import->setEntityCode('advanced_pricing');
-            $import->setMultipleValueSeparator(self::SEPARATOR);
-            $import->processImport($pricesArray);
-        } catch (\Exception $e) {
-            $this->log->logError($e->getMessage());
-        }
-        $this->log->logInfo($import->getLogTrace());
-        $this->log->logError($import->getErrorMessages());
+        $this->log->logError('Not supported without FSI');
     }
 
     /**
