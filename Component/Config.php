@@ -4,12 +4,14 @@ namespace CtiDigital\Configurator\Component;
 
 use CtiDigital\Configurator\Api\ComponentInterface;
 use CtiDigital\Configurator\Api\LoggerInterface;
+use CtiDigital\Configurator\Api\VersionManagementInterface;
 use CtiDigital\Configurator\Exception\ComponentException;
 use CtiDigital\Configurator\Model\Processor;
 use Magento\Config\Model\Config\Backend\Encrypted;
 use Magento\Config\Model\ResourceModel\Config as ConfigResource;
 use Magento\Config\Model\ResourceModel\Config\Data\CollectionFactory as ConfigCollectionFactory;
 use Magento\Framework\App\Config as ScopeConfig;
+use Magento\Framework\App\Config\Initial;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Encryption\EncryptorInterface;
 use Magento\Framework\Exception\LocalizedException;
@@ -75,12 +77,14 @@ class Config implements ComponentInterface
      * Config constructor.
      * @param ConfigResource $configResource
      * @param ScopeConfig $scopeConfig
-     * @param ScopeConfig\Initial $initialConfig
+     * @param Initial $initialConfig
      * @param CollectionFactory $collectionFactory
      * @param EncryptorInterface $encryptor
      * @param WebsiteFactory $websiteFactory
      * @param StoreFactory $storeFactory
      * @param LoggerInterface $log
+     * @param VersionManagementInterface $versionManagement
+     * @param ConfigCollectionFactory $configValueFactory
      */
     public function __construct(
         ConfigResource $configResource,
@@ -91,6 +95,7 @@ class Config implements ComponentInterface
         WebsiteFactory $websiteFactory,
         StoreFactory $storeFactory,
         LoggerInterface $log,
+        private readonly VersionManagementInterface $versionManagement,
         ConfigCollectionFactory $configValueFactory
     ) {
         $this->configValueFactory = $configValueFactory;
@@ -135,7 +140,8 @@ class Config implements ComponentInterface
                             $convertedConfiguration['path'],
                             $convertedConfiguration['value'],
                             $encryption,
-                            $mode
+                            $mode,
+                            $convertedConfiguration['version'] ?? null
                         );
                     }
                 }
@@ -156,7 +162,8 @@ class Config implements ComponentInterface
                                 $convertedConfiguration['value'],
                                 $code,
                                 $encryption,
-                                $mode
+                                $mode,
+                                $convertedConfiguration['version'] ?? null
                             );
                         }
                     }
@@ -179,7 +186,8 @@ class Config implements ComponentInterface
                                 $convertedConfiguration['value'],
                                 $code,
                                 $encryption,
-                                $mode
+                                $mode,
+                                $convertedConfiguration['version'] ?? null
                             );
                         }
                     }
@@ -219,14 +227,24 @@ class Config implements ComponentInterface
      * @param string $mode
      * @return void
      */
-    private function setGlobalConfig(string $path, ?string $value = null, int $encrypted = 0, string $mode = Processor::MODE_MAINTAIN): void
-    {
+    private function setGlobalConfig(
+        string $path,
+        ?string $value = null,
+        int $encrypted = 0,
+        string $mode = Processor::MODE_MAINTAIN,
+        ?string $version = null
+    ): void {
         try {
             // Check existing value, skip if the same
             $scope = ScopeConfigInterface::SCOPE_TYPE_DEFAULT;
             $existingValue = $this->getSetConfigValue($path, $scope, 0);
+            $versionId = $this->alias . '_global_' . $path;
 
-            if (($existingValue !== false && $value == $existingValue) || ($existingValue && $mode == Processor::MODE_CREATE)) {
+            $isNewVersion = isset($version) && $this->versionManagement->isNewVersion($versionId, (int) $version);
+
+            if (($existingValue !== false && $value == $existingValue) ||
+                ($existingValue && $mode == Processor::MODE_CREATE && !$isNewVersion)
+            ) {
                 $this->log->logComment(sprintf("Global Config Already Has Value: %s = %s", $path, $existingValue));
                 return;
             }
@@ -238,6 +256,9 @@ class Config implements ComponentInterface
             // Save the config
             $this->configResource->saveConfig($path, $value, $scope, 0);
             $this->log->logInfo(sprintf("Global Config: %s = %s", $path, $value));
+            if ($version) {
+                $this->versionManagement->setVersion($versionId, (int) $version);
+            }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
         }
@@ -253,8 +274,14 @@ class Config implements ComponentInterface
      * @param string $mode
      * @return void
      */
-    private function setWebsiteConfig(string $path, ?string $value, string $code, int $encrypted = 0, string $mode = Processor::MODE_MAINTAIN): void
-    {
+    private function setWebsiteConfig(
+        string $path,
+        ?string $value,
+        string $code,
+        int $encrypted = 0,
+        string $mode = Processor::MODE_MAINTAIN,
+        ?string $version = null
+    ): void {
         try {
             $logNest = 1;
             $scope = 'websites';
@@ -268,7 +295,12 @@ class Config implements ComponentInterface
 
             // Check existing value, skip if the same
             $existingValue = $this->getSetConfigValue($path, $scope, $website->getId());
-            if (($existingValue !== false && $value == $existingValue) || ($existingValue && $mode == Processor::MODE_CREATE)) {
+            $versionId = $this->alias . '_website_' . $website->getId() . '_' . $path;
+            $isNewVersion = isset($version) && $this->versionManagement->isNewVersion($versionId, (int) $version);
+
+            if (($existingValue !== false && $value == $existingValue) ||
+                ($existingValue && $mode == Processor::MODE_CREATE && !$isNewVersion)
+            ) {
                 $this->log->logComment(sprintf("Website '%s' Config Already: %s = %s", $code, $path, $existingValue), $logNest);
                 return;
             }
@@ -280,6 +312,9 @@ class Config implements ComponentInterface
             // Save the config
             $this->configResource->saveConfig($path, $value, $scope, $website->getId());
             $this->log->logInfo(sprintf("Website '%s' Config: %s = %s", $code, $path, $value), $logNest);
+            if ($version) {
+                $this->versionManagement->setVersion($versionId, (int) $version);
+            }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
         }
@@ -314,8 +349,14 @@ class Config implements ComponentInterface
      * @return void
      * @throws LocalizedException
      */
-    private function setStoreConfig(string $path, ?string $value, string $code, int $encrypted = 0, string $mode = Processor::MODE_MAINTAIN): void
-    {
+    private function setStoreConfig(
+        string $path,
+        ?string $value,
+        string $code,
+        int $encrypted = 0,
+        string $mode = Processor::MODE_MAINTAIN,
+        ?string $version = null
+    ): void {
         try {
             $logNest = 2;
             $scope = 'stores';
@@ -328,7 +369,11 @@ class Config implements ComponentInterface
 
             // Check existing value, skip if the same
             $existingValue = $this->getSetConfigValue($path, $scope, $storeView->getId());
-            if (($existingValue !== false && $value == $existingValue) || ($existingValue && $mode == Processor::MODE_CREATE)) {
+            $versionId = $this->alias . '_store_' . $storeView->getId() . '_' . $path;
+            $isNewVersion = isset($version) && $this->versionManagement->isNewVersion($versionId, (int) $version);
+
+            if (($existingValue !== false && $value == $existingValue) ||
+                ($existingValue && $mode == Processor::MODE_CREATE && !$isNewVersion)) {
                 $this->log->logComment(sprintf("Store '%s' Config Already: %s = %s", $code, $path, $existingValue), $logNest);
                 return;
             }
@@ -339,6 +384,9 @@ class Config implements ComponentInterface
 
             $this->configResource->saveConfig($path, $value, $scope, $storeView->getId());
             $this->log->logInfo(sprintf("Store '%s' Config: %s = %s", $code, $path, $value), $logNest);
+            if ($version) {
+                $this->versionManagement->setVersion($versionId, (int) $version);
+            }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
         }
