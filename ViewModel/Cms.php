@@ -14,6 +14,7 @@ use Magento\Cms\Model\ResourceModel\Block as BlockResource;
 use Magento\Cms\Model\ResourceModel\Page as PageResource;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\View\Element\Block\ArgumentInterface;
+use Magento\Store\Model\StoreManagerInterface;
 
 class Cms implements ArgumentInterface
 {
@@ -29,7 +30,8 @@ class Cms implements ArgumentInterface
         private readonly PageResource $pageResource,
         private readonly BlockFactory $blockFactory,
         private readonly BlockResource $blockResource,
-        private readonly CategoryCollectionFactory $categoryCollectionFactory
+        private readonly CategoryCollectionFactory $categoryCollectionFactory,
+        private readonly StoreManagerInterface $storeManager
     ) {
     }
 
@@ -38,12 +40,17 @@ class Cms implements ArgumentInterface
      *
      * @param string $identifier
      * @param int $store
-     *
+     * @param string|null $storeCode
      * @return Page
      */
-    public function getPage(string $identifier, int $store = 0): Page
+    public function getPage(string $identifier, int $store = 0, ?string $storeCode = null): Page
     {
         $page = $this->pageFactory->create();
+
+        if ($storeCode) {
+            $store = (int)$this->storeManager->getStore($storeCode)->getId();
+        }
+
         $page->setStoreId($store);
 
         $this->pageResource->load($page, $identifier, 'identifier');
@@ -60,12 +67,17 @@ class Cms implements ArgumentInterface
      *
      * @param string $identifier
      * @param int $store
-     *
+     * @param string|null $storeCode
      * @return Block
      */
-    public function getBlock(string $identifier, int $store = 0): Block
+    public function getBlock(string $identifier, int $store = 0, ?string $storeCode = null): Block
     {
         $block = $this->blockFactory->create();
+
+        if ($storeCode) {
+            $store = (int)$this->storeManager->getStore($storeCode)->getId();
+        }
+
         $block->setStoreId($store);
 
         $this->blockResource->load($block, $identifier, 'identifier');
@@ -82,12 +94,16 @@ class Cms implements ArgumentInterface
      *
      * @param string $urlPath
      * @param int $store
+     * @param string|null $storeCode
      * @return Category
-     * @throws LocalizedException
      */
-    public function getCategory(string $urlPath, int $store = 0): Category
+    public function getCategory(string $urlPath, int $store = 0, ?string $storeCode = null): Category
     {
         try {
+            if ($storeCode) {
+                $store = (int)$this->storeManager->getStore($storeCode)->getId();
+            }
+
             /** @var Category $category */
             $category = $this->categoryCollectionFactory->create()
                 ->addFieldToFilter('url_key', $urlPath)
