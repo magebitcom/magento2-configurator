@@ -331,7 +331,7 @@ class Processor
             foreach($additional as $key => $value) {
                 foreach($value['sources'] as &$source) {
                     if (str_starts_with($source, './configurator/')) {
-                        $source = dirname($additionalPath) . substr($source, 14);
+                        $source = str_replace(BP . '/', '', dirname($additionalPath)) . substr($source, 1);
                     }
                 }
 
