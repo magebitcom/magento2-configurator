@@ -316,6 +316,33 @@ class Processor
         $yaml = new Parser();
         $master = $yaml->parse($yamlContents);
 
+        $additionalSources = $master['additional_sources'] ?? [];
+        unset($master['additional_sources']);
+
+        foreach ($additionalSources as $additionalSource) {
+           $additionalPath = BP . '/' . $additionalSource;
+            if (!file_exists($additionalPath)) {
+                throw new ComponentException("Additional source $additionalSource YAML does not exist.");
+            }
+            $this->log->logComment(sprintf("Found $additionalSource YAML"));
+            $yamlContents = file_get_contents($additionalPath);
+            $yaml = new Parser();
+            $additional = $yaml->parse($yamlContents);
+            foreach($additional as $key => $value) {
+                foreach($value['sources'] as &$source) {
+                    if (str_starts_with($source, './configurator/')) {
+                        $source = dirname($additionalPath) . substr($source, 14);
+                    }
+                }
+
+                if (isset($master[$key])) {
+                    $master[$key]['sources'] = array_merge($value['sources'], $master[$key]['sources']);
+                } else {
+                    $master[$key] = $value;
+                }
+            }
+        }
+        
         // Validate master yaml
         $this->validateMasterYaml($master);
 
