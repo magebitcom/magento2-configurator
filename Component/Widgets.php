@@ -8,7 +8,7 @@ use CtiDigital\Configurator\Exception\ComponentException;
 use Magento\Widget\Model\ResourceModel\Widget\Instance\Collection as WidgetCollection;
 use Magento\Widget\Model\Widget\Instance;
 use Magento\Widget\Model\Widget\InstanceFactory as WidgetInstanceFactory;
-use Magento\Theme\Model\ResourceModel\Theme\Collection as ThemeCollection;
+use Magento\Theme\Model\ResourceModel\Theme\CollectionFactory as ThemeCollectionFactory;
 use Magento\Store\Model\StoreFactory;
 use Magento\Framework\Serialize\SerializerInterface;
 use Magento\Framework\App\Area as AppArea;
@@ -61,7 +61,7 @@ class Widgets implements ComponentInterface
      * @param WidgetCollection $collection
      * @param WidgetInstanceFactory $widgetFactory
      * @param StoreFactory $storeFactory
-     * @param ThemeCollection $themeCollection
+     * @param ThemeCollectionFactory $themeCollection
      * @param SerializerInterface $serializer
      * @param LoggerInterface $log
      * @param AppState $appState
@@ -70,7 +70,7 @@ class Widgets implements ComponentInterface
         WidgetCollection $collection,
         WidgetInstanceFactory $widgetFactory,
         StoreFactory $storeFactory,
-        ThemeCollection $themeCollection,
+        ThemeCollectionFactory $themeCollection,
         SerializerInterface $serializer,
         LoggerInterface $log,
         AppState $appState
@@ -218,7 +218,8 @@ class Widgets implements ComponentInterface
     {
 
         // Filter Theme Collection
-        $themes = $this->themeCollection->addFilter('code', $themeCode);
+        $collection = $this->themeCollection->create();
+        $themes = $collection->addFilter('code', $themeCode);
 
         if ($themes->count() == 0) {
             throw new ComponentException(sprintf('Could not find any themes with the theme code %s', $themeCode));
