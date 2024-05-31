@@ -11,6 +11,8 @@ use Magento\Widget\Model\Widget\InstanceFactory as WidgetInstanceFactory;
 use Magento\Theme\Model\ResourceModel\Theme\Collection as ThemeCollection;
 use Magento\Store\Model\StoreFactory;
 use Magento\Framework\Serialize\SerializerInterface;
+use Magento\Framework\App\Area as AppArea;
+use Magento\Framework\App\State as AppState;
 
 class Widgets implements ComponentInterface
 {
@@ -50,6 +52,11 @@ class Widgets implements ComponentInterface
     private $log;
 
     /**
+     * @var AppState
+     */
+    private $appState;
+
+    /**
      * Widgets constructor.
      * @param WidgetCollection $collection
      * @param WidgetInstanceFactory $widgetFactory
@@ -57,6 +64,7 @@ class Widgets implements ComponentInterface
      * @param ThemeCollection $themeCollection
      * @param SerializerInterface $serializer
      * @param LoggerInterface $log
+     * @param AppState $appState
      */
     public function __construct(
         WidgetCollection $collection,
@@ -64,7 +72,8 @@ class Widgets implements ComponentInterface
         StoreFactory $storeFactory,
         ThemeCollection $themeCollection,
         SerializerInterface $serializer,
-        LoggerInterface $log
+        LoggerInterface $log,
+        AppState $appState
     ) {
         $this->widgetCollection = $collection;
         $this->widgetFactory = $widgetFactory;
@@ -72,6 +81,7 @@ class Widgets implements ComponentInterface
         $this->storeFactory = $storeFactory;
         $this->serializer = $serializer;
         $this->log = $log;
+        $this->appState = $appState;
     }
 
     public function execute($data = null)
@@ -124,11 +134,21 @@ class Widgets implements ComponentInterface
 
                 $canSave = true;
                 $widget->setData($key, $value);
-                $this->log->logInfo(sprintf("Widget %s = %s", $key, $value), 1);
+                if (is_array($value)) {
+                    $this->log->logInfo(sprintf("Widget %s = %s", $key, print_r($value, true)), 1);
+                } else {
+                    $this->log->logInfo(sprintf("Widget %s = %s", $key, $value), 1);
+                }
             }
 
             if ($canSave) {
-                $widget->save();
+                $this->appState->emulateAreaCode(
+                    AppArea::AREA_FRONTEND,
+                    function() use ($widget) {
+                        $widget->save();
+                    }
+                );
+
                 $this->log->logInfo(sprintf("Saved Widget %s", $widget->getTitle()), 1);
             }
         } catch (ComponentException $e) {
