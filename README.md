@@ -35,6 +35,9 @@ php vendor/bin/phpcpd vendor/ctidigital/magento2-configurator/Model/ vendor/ctid
 php vendor/bin/phpunit vendor/ctidigital/magento2-configurator/Test/Unit/
 ```
 
+## Known issues
+- [Media copy error if destination folder does not exists](https://github.com/magebitcom/magento2-configurator/issues/14)
+
 ## Integration tests
 - Configure your [Magento integration test environment](http://devdocs.magento.com/guides/v2.0/test/integration/integration_test_setup.html).
 - Add the XML below to dev/tests/integration/phpunit.xml.dist
