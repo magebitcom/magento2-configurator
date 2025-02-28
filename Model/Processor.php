@@ -229,7 +229,7 @@ class Processor
 
         $sourceType = (isset($componentConfig['type']) === true) ? $componentConfig['type'] : null;
 
-        $mode = $componentConfig['env'][$this->getEnvironment()]['mode'] ?? self::MODE_MAINTAIN;
+        $mode = $componentConfig['env'][$this->getEnvironment()]['mode'] ?? self::MODE_CREATE;
 
         if (isset($componentConfig['sources'])) {
             foreach ($componentConfig['sources'] as $source) {
