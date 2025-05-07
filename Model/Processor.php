@@ -178,7 +178,7 @@ class Processor
                 $this->state->emulateAreaCode(
                     $areaCode,
                     [$this, 'runComponent'],
-                    [$componentAlias, $componentConfig]
+                    [$componentAlias, $masterConfig]
                 );
 
             }
