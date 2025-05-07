@@ -174,11 +174,13 @@ class Processor
                 $masterConfig = $master[$componentAlias];
 
                 // Run that component
+                $areaCode = ($componentAlias === 'pages') ? Area::AREA_FRONTEND : Area::AREA_ADMINHTML;
                 $this->state->emulateAreaCode(
-                    Area::AREA_ADMINHTML,
+                    $areaCode,
                     [$this, 'runComponent'],
                     [$componentAlias, $masterConfig]
                 );
+
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -198,11 +200,13 @@ class Processor
             // Loop through components and run them individually in the master.yaml order
             foreach ($master as $componentAlias => $componentConfig) {
                 // Run the component in question
+                $areaCode = ($componentAlias === 'pages') ? Area::AREA_FRONTEND : Area::AREA_ADMINHTML;
                 $this->state->emulateAreaCode(
-                    Area::AREA_ADMINHTML,
+                    $areaCode,
                     [$this, 'runComponent'],
                     [$componentAlias, $componentConfig]
                 );
+
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
