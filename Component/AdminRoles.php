@@ -114,7 +114,7 @@ class AdminRoles implements ComponentInterface
      * @param role
      * @param array|null $resources
      */
-    private function setResourceIds($role, array $resources = null)
+    private function setResourceIds($role, ?array $resources = null)
     {
         $roleName = $role->getRoleName();
 

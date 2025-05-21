@@ -142,11 +142,13 @@ class Rewrites implements ComponentInterface
         $successMessage = 'URL Rewrite: "%s" created';
         $rewriteCount = $rewrite->getCollection()
             ->addFieldToFilter(self::REQUEST_PATH_KEY, $rewriteArray[self::REQUEST_PATH_CSV_KEY])
+            ->addFieldToFilter('store_id', $rewriteArray[self::STORE_ID_CSV_KEY])
             ->getSize();
 
         if ($rewriteCount > 0) {
             $rewrite = $rewrite->getCollection()
                 ->addFieldToFilter(self::REQUEST_PATH_KEY, $rewriteArray[self::REQUEST_PATH_CSV_KEY])
+                ->addFieldToFilter('store_id', $rewriteArray[self::STORE_ID_CSV_KEY])
                 ->getFirstItem();
 
             $successMessage = 'URL Rewrite: "%s" already exists, rewrite updated';
