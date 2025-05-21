@@ -153,7 +153,7 @@ class ApiIntegrations implements ComponentInterface
      * @param $integrationId
      * @param array $resources
      */
-    private function setPermissions($integrationId, array $resources = null)
+    private function setPermissions($integrationId, ?array $resources = null)
     {
         $authorizationService = $this->authorizationService;
         $authorizationService->grantPermissions($integrationId, $resources);

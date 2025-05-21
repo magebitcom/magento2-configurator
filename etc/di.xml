@@ -3,8 +3,6 @@
 
     <preference for="CtiDigital\Configurator\Api\ConfiguratorAdapterInterface"
                 type="CtiDigital\Configurator\Api\ConfiguratorAdapterInterface\Proxy"/>
-    <preference for="CtiDigital\Configurator\Api\ConfigInterface"
-                type="CtiDigital\Configurator\Model\Configurator\Config" />
     <preference for="CtiDigital\Configurator\Api\LoggerInterface"
                 type="CtiDigital\Configurator\Model\Logging" />
     <preference for="CtiDigital\Configurator\Api\ComponentListInterface"

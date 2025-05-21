@@ -62,7 +62,8 @@ class Attributes implements ComponentInterface
         'filterable' => 'is_filterable',
         'user_defined' => 'is_user_defined',
         'default' => 'default_value',
-        'used_for_promo_rules' => 'is_used_for_promo_rules'
+        'used_for_promo_rules' => 'is_used_for_promo_rules',
+        'wysiwyg_enabled' => 'is_wysiwyg_enabled'
     ];
 
     /**

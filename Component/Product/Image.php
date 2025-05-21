@@ -106,7 +106,7 @@ class Image
     public function getFileName($url)
     {
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
-        $imageName = basename($url);
+        $imageName = basename((string) $url);
         // Remove any URL entities
         $imageName = urldecode($imageName);
         // Replace spaces with -
@@ -124,9 +124,9 @@ class Image
     public function saveFile($fileName, $value)
     {
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
-        $name = pathinfo($fileName, PATHINFO_FILENAME);
+        $name = pathinfo((string) $fileName, PATHINFO_FILENAME);
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
-        $ext = pathinfo($fileName, PATHINFO_EXTENSION);
+        $ext = pathinfo((string) $fileName, PATHINFO_EXTENSION);
 
         $writeDirectory = $this->filesystem->getDirectoryWrite(DirectoryList::MEDIA);
         $importDirectory = $this->getFileDirectory($writeDirectory);
@@ -167,7 +167,7 @@ class Image
     public function getImage($value)
     {
         $validImages = [];
-        $images = explode(',', $value);
+        $images = explode(',', (string) $value);
         foreach ($images as $image) {
             if ($this->isValueURL($image) === false) {
                 $validImages[] = $image;
