@@ -13,6 +13,8 @@ use Magento\Store\Model\StoreFactory;
 use Magento\Framework\Serialize\SerializerInterface;
 use Magento\Framework\App\Area as AppArea;
 use Magento\Framework\App\State as AppState;
+use Magento\Cms\Api\BlockRepositoryInterface;
+use Magento\Framework\Api\SearchCriteriaBuilder;
 
 class Widgets implements ComponentInterface
 {
@@ -57,6 +59,16 @@ class Widgets implements ComponentInterface
     private $appState;
 
     /**
+     * @var BlockRepositoryInterface
+     */
+    private $blockRepository;
+
+    /**
+     * @var SearchCriteriaBuilder
+     */
+    private $criteriaBuilder;
+
+    /**
      * Widgets constructor.
      * @param WidgetCollection $collection
      * @param WidgetInstanceFactory $widgetFactory
@@ -65,6 +77,8 @@ class Widgets implements ComponentInterface
      * @param SerializerInterface $serializer
      * @param LoggerInterface $log
      * @param AppState $appState
+     * @param BlockRepositoryInterface $blockRepository
+     * @param SearchCriteriaBuilder $criteriaBuilder
      */
     public function __construct(
         WidgetCollection $collection,
@@ -73,7 +87,9 @@ class Widgets implements ComponentInterface
         ThemeCollectionFactory $themeCollection,
         SerializerInterface $serializer,
         LoggerInterface $log,
-        AppState $appState
+        AppState $appState,
+        BlockRepositoryInterface $blockRepository,
+        SearchCriteriaBuilder $criteriaBuilder
     ) {
         $this->widgetCollection = $collection;
         $this->widgetFactory = $widgetFactory;
@@ -82,6 +98,8 @@ class Widgets implements ComponentInterface
         $this->serializer = $serializer;
         $this->log = $log;
         $this->appState = $appState;
+        $this->blockRepository = $blockRepository;
+        $this->criteriaBuilder = $criteriaBuilder;
     }
 
     public function execute($data = null)
@@ -144,7 +162,7 @@ class Widgets implements ComponentInterface
             if ($canSave) {
                 $this->appState->emulateAreaCode(
                     AppArea::AREA_FRONTEND,
-                    function() use ($widget) {
+                    function () use ($widget) {
                         $widget->save();
                     }
                 );
@@ -237,8 +255,84 @@ class Widgets implements ComponentInterface
      */
     public function populateWidgetParameters(array $parameters)
     {
+        // Process block_identifier if present
+        $processedParameters = $this->processBlockIdentifiers($parameters);
+
         // Default property return
-        return $this->serializer->serialize($parameters);
+        return $this->serializer->serialize($processedParameters);
+    }
+
+    /**
+     * Process block identifiers in widget parameters and convert them to block IDs
+     *
+     * @param array $parameters
+     * @return array
+     */
+    private function processBlockIdentifiers(array $parameters)
+    {
+        $processedParameters = $parameters;
+
+        foreach ($parameters as $key => $value) {
+            if ($key === 'block_identifier' && is_string($value)) {
+                try {
+                    $blockId = $this->getBlockIdByIdentifier($value);
+                    // Replace block_identifier with block_id for the widget
+                    unset($processedParameters['block_identifier']);
+                    $processedParameters['block_id'] = $blockId;
+
+                    $this->log->logInfo(
+                        sprintf("Resolved block identifier '%s' to block ID '%s'", $value, $blockId),
+                        1
+                    );
+                } catch (ComponentException $e) {
+                    $this->log->logError(
+                        sprintf("Failed to resolve block identifier '%s': %s", $value, $e->getMessage())
+                    );
+                    throw $e;
+                }
+            }
+        }
+
+        return $processedParameters;
+    }
+
+    /**
+     * Get CMS block ID by identifier
+     *
+     * @param string $identifier
+     * @return string
+     * @throws ComponentException
+     */
+    private function getBlockIdByIdentifier($identifier)
+    {
+        try {
+            $searchCriteria = $this->criteriaBuilder
+                ->addFilter('identifier', $identifier)
+                ->create();
+
+            $blocks = $this->blockRepository->getList($searchCriteria);
+
+            if ($blocks->getTotalCount() === 0) {
+                throw new ComponentException(sprintf('CMS Block with identifier "%s" not found', $identifier));
+            }
+
+            if ($blocks->getTotalCount() > 1) {
+                $this->log->logComment(
+                    sprintf('Multiple CMS blocks found with identifier "%s", using the first one', $identifier),
+                    1
+                );
+            }
+
+            foreach ($blocks->getItems() as $block) {
+                return (string) $block->getId();
+            }
+
+            throw new ComponentException(sprintf('No block found with identifier "%s"', $identifier));
+        } catch (\Exception $e) {
+            throw new ComponentException(
+                sprintf('Error retrieving CMS block with identifier "%s": %s', $identifier, $e->getMessage())
+            );
+        }
     }
 
     /**
