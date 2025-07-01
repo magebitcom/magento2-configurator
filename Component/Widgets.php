@@ -265,6 +265,12 @@ class Widgets implements ComponentInterface
     /**
      * Process block identifiers in widget parameters and convert them to block IDs
      *
+     * Usage:
+     *
+     * ```yaml
+     * - parameters:
+     * -    block_identifier: <block_identifier> # e.g. venta-contact-us-faq
+     * ```
      * @param array $parameters
      * @return array
      */
