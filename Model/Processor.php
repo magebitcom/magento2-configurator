@@ -345,8 +345,6 @@ class Processor
 
         $this->mergeAdditionalMasters($master);
 
-        dd($master);
-
         $additionalSources = $master['additional_sources'] ?? [];
         unset($master['additional_sources']);
 
