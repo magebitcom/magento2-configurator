@@ -15,7 +15,9 @@ use Magento\Framework\App\State;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Yaml\Parser;
 use Symfony\Component\Yaml\Yaml;
-
+use \Magento\Framework\Module\FullModuleList;
+use Magento\Framework\Module\Dir;
+use Magento\Framework\Module\Manager;
 /**
  * Class Processor - The overarching class that reads and processes the configurator files.
  *
@@ -57,6 +59,21 @@ class Processor
     protected $log;
 
     /**
+     * @var FullModuleList
+     */
+    protected $fullModuleList;
+
+    /**
+     * @var Dir
+     */
+    protected $dir;
+
+    /**
+     * @var Manager
+     */
+    protected $manager;
+
+    /**
      * @var bool
      */
     protected $ignoreMissingFiles = false;
@@ -70,11 +87,17 @@ class Processor
     public function __construct(
         ComponentListInterface $componentList,
         State $state,
-        LoggerInterface $logging
+        LoggerInterface $logging,
+        FullModuleList $fullModuleList,
+        Dir $dir,
+        Manager $manager
     ) {
         $this->componentList = $componentList;
         $this->state = $state;
         $this->log = $logging;
+        $this->fullModuleList = $fullModuleList;
+        $this->dir = $dir;
+        $this->manager = $manager;
     }
 
     /**
@@ -320,6 +343,10 @@ class Processor
         $yaml = new Parser();
         $master = $yaml->parse($yamlContents);
 
+        $this->mergeAdditionalMasters($master);
+
+        dd($master);
+
         $additionalSources = $master['additional_sources'] ?? [];
         unset($master['additional_sources']);
 
@@ -346,7 +373,7 @@ class Processor
                 }
             }
         }
-        
+
         // Validate master yaml
         $this->validateMasterYaml($master);
 
@@ -641,5 +668,26 @@ class Processor
     private function parseJsonData($source): mixed
     {
         return json_decode((string) $source);
+    }
+
+    /**
+     * @param $master
+     * @return void
+     */
+    protected function mergeAdditionalMasters(&$master): void
+    {
+        foreach($this->fullModuleList->getAll() as $module) {
+            $moduleName = $module['name'];
+            if (!$this->manager->isEnabled($moduleName)) {
+                continue;
+            }
+            $modulePath = $this->dir->getDir($moduleName, Dir::MODULE_ETC_DIR);
+            if (!file_exists($modulePath . '/master.yaml')) {
+                continue;
+            }
+            $this->log->logInfo(sprintf("Found %s master.yaml", $moduleName));
+            $moduleConfig = $this->parseYamlData(file_get_contents($modulePath . '/master.yaml'));
+            $master = array_merge_recursive($moduleConfig, $master);
+        }
     }
 }
