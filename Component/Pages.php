@@ -11,12 +11,15 @@ use CtiDigital\Configurator\Model\Processor;
 use Magento\Cms\Api\Data\PageInterface;
 use Magento\Cms\Api\Data\PageInterfaceFactory;
 use Magento\Cms\Api\PageRepositoryInterface;
+use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\Escaper;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Framework\ObjectManagerInterface;
 use Magento\Store\Api\StoreRepositoryInterface;
+use Magento\Store\Model\Store;
 use Symfony\Component\Filesystem\Filesystem;
+use Magento\Framework\EntityManager\MetadataPool;
 
 /**
  * @see \CtiDigital\Configurator\Component\Pages
@@ -40,6 +43,8 @@ class Pages implements ComponentInterface
      * @param Escaper $escaper
      * @param VersionManagementInterface $versionManagement
      * @param ObjectManagerInterface $objectManager
+     * @param ResourceConnection $resourceConnection
+     * @param MetadataPool $metadataPool
      */
     public function __construct(
         private readonly PageRepositoryInterface    $pageRepository,
@@ -49,7 +54,9 @@ class Pages implements ComponentInterface
         private readonly Filesystem                 $filesystem,
         private readonly Escaper $escaper,
         private readonly VersionManagementInterface $versionManagement,
-        private readonly ObjectManagerInterface $objectManager
+        private readonly ObjectManagerInterface $objectManager,
+        private readonly ResourceConnection $resourceConnection,
+        private readonly MetadataPool $metadataPool,
     ) {
         if (class_exists('Hyva\Theme\Model\ViewModelRegistry')) {
             $this->viewModelRegistry = $this->objectManager->create('Hyva\Theme\Model\ViewModelRegistry');
@@ -92,10 +99,10 @@ class Pages implements ComponentInterface
                 if (isset($pageData['stores'])) {
                     foreach ($pageData['stores'] as $storeCode) {
                         $store = $this->storeRepository->get($storeCode);
-                        $pageId = $this->pageFactory->create()->checkIdentifier($identifier, $store->getId());
+                        $pageId = $this->getPageIdByIdentifier($identifier, $store->getId());
                     }
                 } else {
-                    $pageId = $this->pageFactory->create()->checkIdentifier($identifier, 0);
+                    $pageId = $this->getPageIdByIdentifier($identifier, 0);
                 }
 
                 $version = $pageData['version'] ?? null;
@@ -213,6 +220,50 @@ class Pages implements ComponentInterface
         } catch (NoSuchEntityException $e) {
             $this->log->logError($e->getMessage());
         }
+    }
+
+    /**
+     * Get page ID by identifier and store ID
+     *
+     * @param string $identifier
+     * @param int $storeId
+     * @return false|int
+     * @throws Exception
+     */
+    protected function getPageIdByIdentifier(string $identifier, int $storeId): false|int
+    {
+        try {
+            $entityMetadata = $this->metadataPool->getMetadata(PageInterface::class);
+        } catch (Exception $e) {
+            $this->log->logError('Failed to get PageInterface entity metadata');
+            throw $e;
+        }
+        $identifierField = $entityMetadata->getIdentifierField();
+        $linkField = $entityMetadata->getLinkField();
+
+        $stores = [Store::DEFAULT_STORE_ID, $storeId];
+        $stores = array_unique($stores);
+        $connection = $this->resourceConnection->getConnection();
+        $cmsPageTable = $connection->getTableName('cms_page');
+        $cmsPageStoreTable = $connection->getTableName('cms_page_store');
+        $select = $connection->select()
+            ->from(['cp' => $cmsPageTable], [$identifierField])
+            ->join(
+                ['cps' => $cmsPageStoreTable],
+                'cp.' . $linkField . ' = cps.' . $linkField,
+                []
+            )
+            ->where('cp.identifier = ?', $identifier)
+            ->where('cps.store_id IN (?)', $stores)
+            ->order('cps.store_id DESC')
+            ->limit(1);
+
+        $pageId = $connection->fetchOne($select);
+        if (!$pageId) {
+            return false;
+        }
+
+        return (int) $pageId;
     }
 
     /**
