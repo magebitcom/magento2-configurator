@@ -67,7 +67,7 @@ class RunCommand extends Command
      * @return int
      * @SuppressWarnings(PHPMD)
      */
-    protected function execute(InputInterface $input, OutputInterface $output)
+    protected function execute(InputInterface $input, OutputInterface $output): int
     {
         try {
             if ($output->getVerbosity() > OutputInterface::VERBOSITY_NORMAL) {
