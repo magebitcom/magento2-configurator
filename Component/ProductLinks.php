@@ -145,7 +145,9 @@ class ProductLinks implements ComponentInterface
             }
 
             // Save product links onto the main product
-            $this->productRepository->get($sku)->setProductLinks($productLinks)->save();
+            $product = $this->productRepository->get($sku);
+            $product->setProductLinks($productLinks);
+            $this->productRepository->save($product);
             $this->log->logComment(sprintf('Saved product links for %s', $sku), 1);
             $result->recordUpdated();
         } catch (ComponentException $e) {

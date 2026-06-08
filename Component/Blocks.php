@@ -18,6 +18,7 @@ use Exception;
 use Magebit\Configurator\Model\Processor;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magento\Cms\Api\BlockRepositoryInterface;
 use Magento\Cms\Api\Data\BlockInterfaceFactory;
 use Magento\Cms\Model\Block;
 use Magento\Cms\Model\ResourceModel\Block\Collection;
@@ -36,6 +37,7 @@ class Blocks implements ComponentInterface
 
     public function __construct(
         private readonly BlockInterfaceFactory $blockFactory,
+        private readonly BlockRepositoryInterface $blockRepository,
         private readonly Store $storeManager,
         private readonly LoggerInterface $log,
         private readonly Filesystem $filesystem,
@@ -225,7 +227,7 @@ class Blocks implements ComponentInterface
                             $identifier
                         ));
                     } else {
-                        $block->save();
+                        $this->blockRepository->save($block);
                         $this->log->logInfo(sprintf(
                             "Save block %s",
                             $identifier . ' (' . $block->getId() . ')'

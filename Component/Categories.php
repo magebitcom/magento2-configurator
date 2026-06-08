@@ -18,6 +18,7 @@ use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
 use Magento\Catalog\Model\Category;
 use Magento\Catalog\Model\CategoryFactory;
+use Magento\Catalog\Model\ResourceModel\Category as CategoryResource;
 use Magento\Cms\Model\BlockFactory;
 use Magento\Cms\Model\ResourceModel\Block as BlockResource;
 use Magento\Framework\App\Filesystem\DirectoryList;
@@ -49,7 +50,8 @@ class Categories implements ComponentInterface
         private readonly DirectoryList $dirList,
         private readonly LoggerInterface $log,
         private readonly BlockFactory $blockFactory,
-        private readonly BlockResource $blockResource
+        private readonly BlockResource $blockResource,
+        private readonly CategoryResource $categoryResource
     ) {
     }
 
@@ -221,7 +223,7 @@ class Categories implements ComponentInterface
                 );
                 $exists ? $result->recordUpdated() : $result->recordCreated();
             } else {
-                $category->save();
+                $this->categoryResource->save($category);
 
                 $this->log->logInfo(
                     sprintf('Updated category %s', $category->getName()),
