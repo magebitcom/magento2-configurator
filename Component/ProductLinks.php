@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -18,64 +20,45 @@ use Magebit\Configurator\Model\ComponentResult;
 
 class ProductLinks implements ComponentInterface
 {
-    protected $alias = 'product_links';
-    protected $name = 'Product Links';
-    protected $description = 'Component to create and maintain product links (related/up-sells/cross-sells)';
+    private const ALIAS = 'product_links';
+    private const DESCRIPTION = 'Component to create and maintain product links (related/up-sells/cross-sells)';
 
-    /**
-     * @var ProductLinkInterfaceFactory
-     */
-    protected $productLinkFactory;
+    /** @var string[] */
+    protected array $allowedLinks = ['relation', 'up_sell', 'cross_sell'];
 
-    /**
-     * @var ProductRepositoryInterface
-     */
-    protected $productRepository;
+    /** @var array<string, string> */
+    protected array $linkTypeMap = ['relation' => 'related', 'up_sell' => 'upsell', 'cross_sell' => 'crosssell'];
 
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    protected $allowedLinks = ['relation', 'up_sell', 'cross_sell'];
-    protected $linkTypeMap = ['relation' => 'related', 'up_sell' => 'upsell', 'cross_sell' => 'crosssell'];
-
-    /**
-     * ProductLinks constructor.
-     * @param ProductRepositoryInterface $productRepository
-     * @param ProductLinkInterfaceFactory $productLinkFactory
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        ProductRepositoryInterface $productRepository,
-        ProductLinkInterfaceFactory $productLinkFactory,
-        LoggerInterface $log
+        private readonly ProductRepositoryInterface $productRepository,
+        private readonly ProductLinkInterfaceFactory $productLinkFactory,
+        private readonly LoggerInterface $log
     ) {
-        $this->productRepository = $productRepository;
-        $this->productLinkFactory = $productLinkFactory;
-        $this->log = $log;
     }
 
     /**
      * Process the data by splitting up the different link types.
-     *
-     * @param $data
      */
     public function execute(ComponentContext $context): ComponentResult
     {
         $result = new ComponentResult();
         $data = $context->getData();
 
+        if (!is_array($data)) {
+            $result->addError('No product link data found in the source data.');
+            return $result;
+        }
+
         try {
             // Loop through all the product link types - if there are multiple link types in the yaml file
             foreach ($data as $linkType => $skus) {
                 // Validate the link type to see if it is allowed
                 if (!in_array($linkType, $this->allowedLinks)) {
-                    throw new ComponentException(sprintf('Link type %s is not supported', $linkType));
+                    throw new ComponentException((string) __('Link type %1 is not supported', $linkType));
                 }
 
                 // Process creating the links
-                $this->processSkus($skus, $linkType);
+                $this->processSkus($skus, (string) $linkType, $context, $result);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -91,21 +74,27 @@ class ProductLinks implements ComponentInterface
      * Process an array of products that require products linking to them
      *
      * @param array $data
-     * @param $linkType
+     * @param string $linkType
+     * @param ComponentContext $context
+     * @param ComponentResult $result
      */
-    private function processSkus(array $data, $linkType)
-    {
+    private function processSkus(
+        array $data,
+        string $linkType,
+        ComponentContext $context,
+        ComponentResult $result
+    ): void {
         try {
             // Loop through the SKUs in the link type
             foreach ($data as $sku => $linkSkus) {
                 // Check if the product exists
-                if (!$this->doesProductExist($sku)) {
-                    throw new ComponentException(sprintf('SKU (%s) for products to link to is not found', $sku));
+                if (!$this->doesProductExist((string) $sku)) {
+                    throw new ComponentException((string) __('SKU (%1) for products to link to is not found', $sku));
                 }
                 $this->log->logInfo(sprintf('Creating product links for %s', $sku));
 
                 // Process the links for that product
-                $this->processLinks($sku, $linkSkus, $linkType);
+                $this->processLinks((string) $sku, $linkSkus, $linkType, $context, $result);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -117,20 +106,27 @@ class ProductLinks implements ComponentInterface
     /**
      * Process all the SKUs that need to be linked to a particular product (SKU)
      *
-     * @param $sku
-     * @param $linkSkus
-     * @param $linkType
+     * @param string $sku
+     * @param array $linkSkus
+     * @param string $linkType
+     * @param ComponentContext $context
+     * @param ComponentResult $result
      */
-    private function processLinks($sku, $linkSkus, $linkType)
-    {
+    private function processLinks(
+        string $sku,
+        array $linkSkus,
+        string $linkType,
+        ComponentContext $context,
+        ComponentResult $result
+    ): void {
         try {
             $productLinks = [];
 
             // Loop through all the products that require linking to a product
             foreach ($linkSkus as $position => $linkSku) {
                 // Check if the product exists
-                if (!$this->doesProductExist($linkSku)) {
-                    throw new ComponentException(sprintf('SKU (%s) to link does not exist', $linkSku));
+                if (!$this->doesProductExist((string) $linkSku)) {
+                    throw new ComponentException((string) __('SKU (%1) to link does not exist', $linkSku));
                 }
 
                 // Create an array of product link objects
@@ -141,9 +137,17 @@ class ProductLinks implements ComponentInterface
                 $this->log->logInfo($linkSku, 1);
             }
 
+            if ($context->isDryRun()) {
+                $this->log->logInfo(sprintf('[dry-run] Would save product links for %s', $sku), 1);
+                $result->recordUpdated();
+
+                return;
+            }
+
             // Save product links onto the main product
             $this->productRepository->get($sku)->setProductLinks($productLinks)->save();
             $this->log->logComment(sprintf('Saved product links for %s', $sku), 1);
+            $result->recordUpdated();
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage(), 1);
         } catch (\Exception $e) {
@@ -158,7 +162,7 @@ class ProductLinks implements ComponentInterface
      * @return bool
      * @todo find an efficient way to check if the product exists.
      */
-    private function doesProductExist($sku)
+    private function doesProductExist(string $sku): bool
     {
         if ($this->productRepository->get($sku)->getId()) {
             return true;
@@ -166,19 +170,13 @@ class ProductLinks implements ComponentInterface
         return false;
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

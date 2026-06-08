@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -18,46 +20,16 @@ use Magento\Eav\Api\AttributeRepositoryInterface;
 use Magento\Eav\Setup\EavSetup;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Catalog\Model\ResourceModel\Eav\Attribute;
+use Magento\Eav\Model\Config as EavConfig;
+use Magento\Eav\Model\ResourceModel\Entity\Attribute\Option\CollectionFactory as AttrOptionCollectionFactory;
 
 /**
  * @SuppressWarnings(PHPMD.LongVariable)
  */
 class Attributes implements ComponentInterface
 {
-
-    protected $alias = 'attributes';
-    protected $name = 'Attributes';
-    protected $description = 'Component to create/maintain attributes.';
-
-    /**
-     * @var EavSetup
-     */
-    protected $eavSetup;
-
-    /**
-     * @var array
-     */
-    protected $cachedAttributeConfig;
-
-    /**
-     * @var AttributeRepository
-     */
-    protected $attributeRepository;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * @var \Magento\Eav\Model\ResourceModel\Entity\Attribute\Option\CollectionFactory
-     */
-    protected $attrOptionCollectionFactory;
-
-    /**
-     * @var \Magento\Eav\Model\Config
-     */
-    protected $eavConfig;
+    private const ALIAS = 'attributes';
+    private const DESCRIPTION = 'Component to create/maintain attributes.';
 
     /**
      * @var array
@@ -118,39 +90,28 @@ class Attributes implements ComponentInterface
      */
     protected $optionCollection = [];
 
-    /**
-     * Attributes constructor.
-     * @param EavSetup $eavSetup
-     * @param AttributeRepositoryInterface $attributeRepository
-     * @param LoggerInterface $log
-     * @param \Magento\Eav\Model\ResourceModel\Entity\Attribute\Option\CollectionFactory $attrOptionCollectionFactory
-     * @param \Magento\Eav\Model\Config $eavConfig
-     */
     public function __construct(
-        EavSetup $eavSetup,
-        AttributeRepositoryInterface $attributeRepository,
-        LoggerInterface $log,
-        \Magento\Eav\Model\ResourceModel\Entity\Attribute\Option\CollectionFactory $attrOptionCollectionFactory,
-        \Magento\Eav\Model\Config $eavConfig
+        protected readonly EavSetup $eavSetup,
+        protected readonly AttributeRepositoryInterface $attributeRepository,
+        protected readonly LoggerInterface $log,
+        protected readonly AttrOptionCollectionFactory $attrOptionCollectionFactory,
+        protected readonly EavConfig $eavConfig
     ) {
-        $this->eavSetup = $eavSetup;
-        $this->attributeRepository = $attributeRepository;
-        $this->log = $log;
-        $this->attrOptionCollectionFactory = $attrOptionCollectionFactory;
-        $this->eavConfig = $eavConfig;
     }
 
-    /**
-     * @param array $attributeConfigurationData
-     */
     public function execute(ComponentContext $context): ComponentResult
     {
         $result = new ComponentResult();
-        $attributeConfigurationData = $context->getData();
+        $data = $context->getData();
+
+        if (!isset($data['attributes']) || !is_array($data['attributes'])) {
+            $result->addError('No "attributes" node found in the source data.');
+            return $result;
+        }
 
         try {
-            foreach ($attributeConfigurationData['attributes'] as $attributeCode => $attributeConfiguration) {
-                $this->processAttribute($attributeCode, $attributeConfiguration);
+            foreach ($data['attributes'] as $attributeCode => $attributeConfiguration) {
+                $this->processAttribute($attributeCode, $attributeConfiguration, $context->isDryRun(), $result);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -161,11 +122,15 @@ class Attributes implements ComponentInterface
     }
 
     /**
-     * @param $attributeCode
-     * @param $attributeConfig
+     * @param string $attributeCode
+     * @param array $attributeConfig
      */
-    protected function processAttribute($attributeCode, array $attributeConfig)
-    {
+    protected function processAttribute(
+        $attributeCode,
+        array $attributeConfig,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
         $this->updateAttribute = true;
         $this->attributeExists = false;
         $attributeArray = $this->eavSetup->getAttribute($this->entityTypeId, $attributeCode);
@@ -183,45 +148,54 @@ class Attributes implements ComponentInterface
             }
         }
 
-        if ($this->updateAttribute) {
-            if (!array_key_exists('user_defined', $attributeConfig)) {
-                $attributeConfig['user_defined'] = 1;
-            }
+        if (!$this->updateAttribute) {
+            $this->log->logComment(sprintf('No update required for attribute %s.', $attributeCode));
+            $result->recordSkipped();
+            return;
+        }
 
-            if (isset($attributeConfig['product_types'])) {
-                $attributeConfig['apply_to'] = implode(',', $attributeConfig['product_types']);
-            }
-            //swatch functionality
-            $swatch = false;
-            if (in_array($attributeConfig['input'], ['swatch_text', 'swatch_visual'])){
-                $swatch = $attributeConfig['input'];
-                $attributeConfig['input'] = 'select';
-                $this->swatchMap =  $attributeConfig['swatch'] ?? [];
-            }
-            //swatch functionality
+        if (!array_key_exists('user_defined', $attributeConfig)) {
+            $attributeConfig['user_defined'] = 1;
+        }
+
+        if (isset($attributeConfig['product_types'])) {
+            $attributeConfig['apply_to'] = implode(',', $attributeConfig['product_types']);
+        }
+        //swatch functionality
+        $swatch = false;
+        if (in_array($attributeConfig['input'], ['swatch_text', 'swatch_visual'])) {
+            $swatch = $attributeConfig['input'];
+            $attributeConfig['input'] = 'select';
+            $this->swatchMap = $attributeConfig['swatch'] ?? [];
+        }
+        //swatch functionality
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would add/update attribute %s.', $attributeCode));
+        } else {
             $this->eavSetup->addAttribute(
                 $this->entityTypeId,
                 $attributeCode,
                 $attributeConfig
             );
-
-            if ($this->attributeExists) {
-                $this->log->logInfo(sprintf('Attribute %s updated.', $attributeCode));
-                return;
-            }
-            //swatch functionality
-            if ($swatch) {
-                if ($swatch === 'swatch_text'){
-                    $this->convertToTextSwatch($attributeCode, $attributeConfig);
-                } else {
-                    $this->convertToVisualSwatch($attributeCode, $attributeConfig);
-
-                }
-            }
-            //swatch functionality
-
-            $this->log->logInfo(sprintf('Attribute %s created.', $attributeCode));
         }
+
+        if ($this->attributeExists) {
+            $this->log->logInfo(sprintf('Attribute %s updated.', $attributeCode));
+            $result->recordUpdated();
+            return;
+        }
+        //swatch functionality
+        if ($swatch) {
+            if ($swatch === 'swatch_text') {
+                $this->convertToTextSwatch($attributeCode, $attributeConfig, $dryRun);
+            } else {
+                $this->convertToVisualSwatch($attributeCode, $attributeConfig, $dryRun);
+            }
+        }
+        //swatch functionality
+
+        $this->log->logInfo(sprintf('Attribute %s created.', $attributeCode));
+        $result->recordCreated();
     }
 
     protected function checkForAttributeUpdates($attributeCode, $attributeArray, $attributeConfig)
@@ -319,20 +293,14 @@ class Attributes implements ComponentInterface
         return $optionsToAdd;
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 
     /**
@@ -340,7 +308,7 @@ class Attributes implements ComponentInterface
      * @param array $attributeConfig
      * @return void
      */
-    public function convertToVisualSwatch(string $attributeName, array $attributeConfig)
+    public function convertToVisualSwatch(string $attributeName, array $attributeConfig, bool $dryRun): void
     {
         $attribute = $this->eavConfig->getAttribute('catalog_product', $attributeName);
         if (!$attribute) {
@@ -353,6 +321,10 @@ class Attributes implements ComponentInterface
         $attributeData['use_product_image_for_swatch'] = 0;
         $attributeData['optionvisual'] = $this->getOptionSwatch($attributeData, $attributeConfig['option']['values']);
         $attributeData['swatchvisual'] = $this->getOptionSwatchVisual($attributeData);
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would convert attribute %s to a visual swatch.', $attributeName));
+            return;
+        }
         $attribute->addData($attributeData);
         $attribute->save();
     }
@@ -362,7 +334,7 @@ class Attributes implements ComponentInterface
      * @param array $attributeConfig
      * @return void
      */
-    public function convertToTextSwatch(string $attributeName, array $attributeConfig)
+    public function convertToTextSwatch(string $attributeName, array $attributeConfig, bool $dryRun): void
     {
         $attribute = $this->eavConfig->getAttribute('catalog_product', $attributeName);
         if (!$attribute) {
@@ -375,6 +347,10 @@ class Attributes implements ComponentInterface
         $attributeData['use_product_image_for_swatch'] = 0;
         $attributeData['optiontext'] = $this->getOptionSwatch($attributeData, $attributeConfig['option']['values']);
         $attributeData['swatchtext'] = $this->getOptionSwatchText($attributeData);
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would convert attribute %s to a text swatch.', $attributeName));
+            return;
+        }
         $attribute->addData($attributeData);
         $attribute->save();
     }
@@ -390,7 +366,7 @@ class Attributes implements ComponentInterface
         foreach ($attributeData['option'] as $optionKey => $optionValue) {
             if (substr($optionValue, 0, 1) == '#' && strlen($optionValue) == 7) {
                 $optionSwatch['value'][$optionKey] = $optionValue;
-            } else if (!empty($this->swatchMap[$optionKey])) {
+            } elseif (!empty($this->swatchMap[$optionKey])) {
                 $optionSwatch['value'][$optionKey] = $this->swatchMap[$optionKey];
             } else {
                 $optionSwatch['value'][$optionKey] = null;

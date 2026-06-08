@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -13,101 +15,34 @@ use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magento\Cms\Api\BlockRepositoryInterface;
+use Magento\Framework\Api\SearchCriteriaBuilder;
+use Magento\Framework\App\Area as AppArea;
+use Magento\Framework\App\State as AppState;
+use Magento\Framework\DataObject;
+use Magento\Framework\Serialize\SerializerInterface;
+use Magento\Store\Model\StoreFactory;
+use Magento\Theme\Model\ResourceModel\Theme\CollectionFactory as ThemeCollectionFactory;
 use Magento\Widget\Model\ResourceModel\Widget\Instance\Collection as WidgetCollection;
 use Magento\Widget\Model\Widget\Instance;
 use Magento\Widget\Model\Widget\InstanceFactory as WidgetInstanceFactory;
-use Magento\Theme\Model\ResourceModel\Theme\CollectionFactory as ThemeCollectionFactory;
-use Magento\Store\Model\StoreFactory;
-use Magento\Framework\Serialize\SerializerInterface;
-use Magento\Framework\App\Area as AppArea;
-use Magento\Framework\App\State as AppState;
-use Magento\Cms\Api\BlockRepositoryInterface;
-use Magento\Framework\Api\SearchCriteriaBuilder;
 
 class Widgets implements ComponentInterface
 {
+    private const ALIAS = 'widgets';
+    private const DESCRIPTION = 'Component to manage CMS Widgets';
 
-    protected $alias = 'widgets';
-    protected $name = 'Widgets';
-    protected $description = 'Component to manage CMS Widgets';
-
-    /**
-     * @var WidgetCollection
-     */
-    private $widgetCollection;
-
-    /**
-     * @var WidgetInstanceFactory
-     */
-    private $widgetFactory;
-
-    /**
-     * @var ThemeCollection
-     */
-    private $themeCollection;
-
-    /**
-     * @var StoreFactory
-     */
-    private $storeFactory;
-
-    /**
-     * @var SerializerInterface
-     */
-    private $serializer;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * @var AppState
-     */
-    private $appState;
-
-    /**
-     * @var BlockRepositoryInterface
-     */
-    private $blockRepository;
-
-    /**
-     * @var SearchCriteriaBuilder
-     */
-    private $criteriaBuilder;
-
-    /**
-     * Widgets constructor.
-     * @param WidgetCollection $collection
-     * @param WidgetInstanceFactory $widgetFactory
-     * @param StoreFactory $storeFactory
-     * @param ThemeCollectionFactory $themeCollection
-     * @param SerializerInterface $serializer
-     * @param LoggerInterface $log
-     * @param AppState $appState
-     * @param BlockRepositoryInterface $blockRepository
-     * @param SearchCriteriaBuilder $criteriaBuilder
-     */
     public function __construct(
-        WidgetCollection $collection,
-        WidgetInstanceFactory $widgetFactory,
-        StoreFactory $storeFactory,
-        ThemeCollectionFactory $themeCollection,
-        SerializerInterface $serializer,
-        LoggerInterface $log,
-        AppState $appState,
-        BlockRepositoryInterface $blockRepository,
-        SearchCriteriaBuilder $criteriaBuilder
+        private readonly WidgetCollection $widgetCollection,
+        private readonly WidgetInstanceFactory $widgetFactory,
+        private readonly StoreFactory $storeFactory,
+        private readonly ThemeCollectionFactory $themeCollection,
+        private readonly SerializerInterface $serializer,
+        private readonly LoggerInterface $log,
+        private readonly AppState $appState,
+        private readonly BlockRepositoryInterface $blockRepository,
+        private readonly SearchCriteriaBuilder $criteriaBuilder
     ) {
-        $this->widgetCollection = $collection;
-        $this->widgetFactory = $widgetFactory;
-        $this->themeCollection = $themeCollection;
-        $this->storeFactory = $storeFactory;
-        $this->serializer = $serializer;
-        $this->log = $log;
-        $this->appState = $appState;
-        $this->blockRepository = $blockRepository;
-        $this->criteriaBuilder = $criteriaBuilder;
     }
 
     public function execute(ComponentContext $context): ComponentResult
@@ -115,9 +50,14 @@ class Widgets implements ComponentInterface
         $result = new ComponentResult();
         $data = $context->getData();
 
+        if ($data === [] || !is_array($data)) {
+            $result->addError('No widgets found in the source data.');
+            return $result;
+        }
+
         try {
             foreach ($data as $widgetData) {
-                $this->processWidget($widgetData);
+                $this->processWidget($widgetData, $context->isDryRun(), $result);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -127,13 +67,15 @@ class Widgets implements ComponentInterface
         return $result;
     }
 
-    public function processWidget($widgetData)
+    public function processWidget(array $widgetData, bool $dryRun, ComponentResult $result): void
     {
         try {
             $widget = $this->findWidgetByInstanceTypeAndTitle($widgetData['instance_type'], $widgetData['title']);
 
+            $isNew = false;
             $canSave = false;
             if ($widget === null) {
+                $isNew = true;
                 $canSave = true;
                 /**
                  * @var Instance $widget
@@ -173,31 +115,43 @@ class Widgets implements ComponentInterface
                 }
             }
 
-            if ($canSave) {
-                $this->appState->emulateAreaCode(
-                    AppArea::AREA_FRONTEND,
-                    function () use ($widget) {
-                        $widget->save();
-                    }
-                );
-
-                $this->log->logInfo(sprintf("Saved Widget %s", $widget->getTitle()), 1);
+            if (!$canSave) {
+                $result->recordSkipped();
+                return;
             }
+
+            if ($dryRun) {
+                $this->log->logInfo(
+                    sprintf('[dry-run] Would save Widget %s', $widget->getTitle()),
+                    1
+                );
+                $isNew ? $result->recordCreated() : $result->recordUpdated();
+                return;
+            }
+
+            $this->appState->emulateAreaCode(
+                AppArea::AREA_FRONTEND,
+                function () use ($widget) {
+                    $widget->save();
+                }
+            );
+
+            $this->log->logInfo(sprintf("Saved Widget %s", $widget->getTitle()), 1);
+            $isNew ? $result->recordCreated() : $result->recordUpdated();
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
     }
 
     /**
-     * @param $widgetInstanceType
-     * @param $widgetTitle
-     * @return \Magento\Framework\DataObject|null
+     * @param string $widgetInstanceType
+     * @param string $widgetTitle
      * @throws ComponentException
      * @todo get this one to work instead of findWidgetByInstanceTypeAndTitle()
      */
-    public function getWidgetByInstanceTypeAndTitle($widgetInstanceType, $widgetTitle)
+    public function getWidgetByInstanceTypeAndTitle($widgetInstanceType, $widgetTitle): ?DataObject
     {
-
         // Clear any existing filters applied to the widget collection
         $this->widgetCollection->getSelect()->reset(\Zend_Db_Select::WHERE);
         $this->widgetCollection->removeAllItems();
@@ -212,7 +166,9 @@ class Widgets implements ComponentInterface
         // If we have more than 1, throw an exception for now. Needs store filter to drill down the widgets further
         // into a single widget.
         if ($widgets->count() > 1) {
-            throw new ComponentException('Application Error: Need to figure out how to handle same titled widgets');
+            throw new ComponentException(
+                (string) __('Application Error: Need to figure out how to handle same titled widgets')
+            );
         }
 
         // If there are no widgets, then it is like it doesn't even exist.
@@ -226,13 +182,12 @@ class Widgets implements ComponentInterface
     }
 
     /**
-     * @param $widgetInstanceType
-     * @param $widgetTitle
+     * @param string $widgetInstanceType
+     * @param string $widgetTitle
      * @return mixed|null
      */
     public function findWidgetByInstanceTypeAndTitle($widgetInstanceType, $widgetTitle)
     {
-
         // Loop through the widget collection to find any matches.
         foreach ($this->widgetCollection as $widget) {
             if ($widget->getTitle() == $widgetTitle && $widget->getInstanceType() == $widgetInstanceType) {
@@ -246,28 +201,32 @@ class Widgets implements ComponentInterface
         return null;
     }
 
-    public function getThemeId($themeCode)
+    /**
+     * @param string $themeCode
+     * @throws ComponentException
+     */
+    public function getThemeId($themeCode): int
     {
-
         // Filter Theme Collection
         $collection = $this->themeCollection->create();
         $themes = $collection->addFilter('code', $themeCode);
 
         if ($themes->count() == 0) {
-            throw new ComponentException(sprintf('Could not find any themes with the theme code %s', $themeCode));
+            throw new ComponentException(
+                (string) __('Could not find any themes with the theme code %1', $themeCode)
+            );
         }
 
         $theme = $themes->getFirstItem();
 
-        return $theme->getId();
+        return (int) $theme->getId();
     }
 
     /**
      * @param array $parameters
-     * @return string
      * @todo better support with parameters that reference IDs of objects
      */
-    public function populateWidgetParameters(array $parameters)
+    public function populateWidgetParameters(array $parameters): string
     {
         // Process block_identifier if present
         $processedParameters = $this->processBlockIdentifiers($parameters);
@@ -286,9 +245,8 @@ class Widgets implements ComponentInterface
      * -    block_identifier: <block_identifier> # e.g. venta-contact-us-faq
      * ```
      * @param array $parameters
-     * @return array
      */
-    private function processBlockIdentifiers(array $parameters)
+    private function processBlockIdentifiers(array $parameters): array
     {
         $processedParameters = $parameters;
 
@@ -320,10 +278,9 @@ class Widgets implements ComponentInterface
      * Get CMS block ID by identifier
      *
      * @param string $identifier
-     * @return string
      * @throws ComponentException
      */
-    private function getBlockIdByIdentifier($identifier)
+    private function getBlockIdByIdentifier($identifier): string
     {
         try {
             $searchCriteria = $this->criteriaBuilder
@@ -333,7 +290,9 @@ class Widgets implements ComponentInterface
             $blocks = $this->blockRepository->getList($searchCriteria);
 
             if ($blocks->getTotalCount() === 0) {
-                throw new ComponentException(sprintf('CMS Block with identifier "%s" not found', $identifier));
+                throw new ComponentException(
+                    (string) __('CMS Block with identifier "%1" not found', $identifier)
+                );
             }
 
             if ($blocks->getTotalCount() > 1) {
@@ -347,45 +306,43 @@ class Widgets implements ComponentInterface
                 return (string) $block->getId();
             }
 
-            throw new ComponentException(sprintf('No block found with identifier "%s"', $identifier));
+            throw new ComponentException(
+                (string) __('No block found with identifier "%1"', $identifier)
+            );
         } catch (\Exception $e) {
             throw new ComponentException(
-                sprintf('Error retrieving CMS block with identifier "%s": %s', $identifier, $e->getMessage())
+                (string) __('Error retrieving CMS block with identifier "%1": %2', $identifier, $e->getMessage())
             );
         }
     }
 
     /**
-     * @param $stores
-     * @return string
+     * @param array $stores
+     * @throws ComponentException
      */
-    public function getCommaSeparatedStoreIds($stores)
+    public function getCommaSeparatedStoreIds($stores): string
     {
         $storeIds = [];
         foreach ($stores as $code) {
             $storeView = $this->storeFactory->create();
             $storeView->load($code, 'code');
             if (!$storeView->getId()) {
-                throw new ComponentException(sprintf('Cannot find store with code %s', $code));
+                throw new ComponentException(
+                    (string) __('Cannot find store with code %1', $code)
+                );
             }
             $storeIds[] = $storeView->getId();
         }
         return implode(',', $storeIds);
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -21,9 +23,9 @@ use Magento\UrlRewrite\Model\UrlPersistInterface;
  */
 class Rewrites implements ComponentInterface
 {
-    protected $alias = "rewrites";
-    protected $name = "rewrites";
-    protected $description = "Component to create URL Store Rewrites";
+    private const ALIAS = 'rewrites';
+    private const DESCRIPTION = 'Component to create URL Store Rewrites';
+
     const THE_ROW_DATA_IS_NOT_VALID_MESSAGE = "The row data is not valid.";
     const URL_REWRITES_COMPLETE_MESSAGE = 'URL Rewrites Complete';
     const URL_REWRITE_REQUIRES_A_REQUEST_PATH_TO_BE_SET_MESSAGE = 'URL Rewrite requires a request path to be set';
@@ -34,44 +36,22 @@ class Rewrites implements ComponentInterface
     const REDIRECT_TYPE_CSV_KEY = 'redirectType';
     const DESCRIPTION_CSV_KEY = 'description';
 
-    /**
-     * @var UrlPersistInterface
-     */
-    protected $urlPersist;
-
-    /**
-     * @var UrlRewriteFactory
-     */
-    protected $urlRewriteFactory;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * Rewrites constructor.
-     * @param UrlPersistInterface $urlPersist
-     * @param UrlRewriteFactory $urlRewriteFactory
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        UrlPersistInterface $urlPersist,
-        UrlRewriteFactory $urlRewriteFactory,
-        LoggerInterface $log
+        private readonly UrlPersistInterface $urlPersist,
+        private readonly UrlRewriteFactory $urlRewriteFactory,
+        private readonly LoggerInterface $log
     ) {
-        $this->urlPersist = $urlPersist;
-        $this->urlRewriteFactory = $urlRewriteFactory;
-        $this->log = $log;
     }
 
-    /**
-     * @param array|null $data
-     */
     public function execute(ComponentContext $context): ComponentResult
     {
         $result = new ComponentResult();
         $data = $context->getData();
+
+        if (!isset($data[0])) {
+            $result->addError(self::THE_ROW_DATA_IS_NOT_VALID_MESSAGE);
+            return $result;
+        }
 
         $headerRowAttributes = $this->getAttributesFromHeaderRow($data);
 
@@ -94,7 +74,7 @@ class Rewrites implements ComponentInterface
                     continue;
                 }
 
-                $this->createOrUpdateRewriteRule($rewriteArray);
+                $this->createOrUpdateRewriteRule($rewriteArray, $context->isDryRun(), $result);
             } catch (ComponentException $e) {
                 $this->log->logError($e->getMessage());
                 $result->addError($e->getMessage());
@@ -111,10 +91,10 @@ class Rewrites implements ComponentInterface
     /**
      * Gets the first row of the CSV file as these should be the attribute keys
      *
-     * @param null $data
+     * @param array $data
      * @return array
      */
-    public function getAttributesFromHeaderRow($data = null)
+    public function getAttributesFromHeaderRow(array $data): array
     {
         $this->checkHeaderRowExists($data);
         $attributes = [];
@@ -126,13 +106,13 @@ class Rewrites implements ComponentInterface
 
     /**
      * @param array $data
-     * @return array
+     * @throws ComponentException
      */
-    public function checkHeaderRowExists(array $data)
+    public function checkHeaderRowExists(array $data): void
     {
         if (!isset($data[0])) {
             throw new ComponentException(
-                self::THE_ROW_DATA_IS_NOT_VALID_MESSAGE
+                (string) __(self::THE_ROW_DATA_IS_NOT_VALID_MESSAGE)
             );
         }
     }
@@ -140,7 +120,7 @@ class Rewrites implements ComponentInterface
     /**
      * @param array $data
      */
-    private function removeHeaderRow(array &$data)
+    private function removeHeaderRow(array &$data): void
     {
         unset($data[0]);
     }
@@ -148,12 +128,13 @@ class Rewrites implements ComponentInterface
     /**
      * Creates UrlRedirect from Array
      *
-     * @param $rewriteArray
+     * @param array $rewriteArray
      */
-    public function createOrUpdateRewriteRule(array $rewriteArray)
+    public function createOrUpdateRewriteRule(array $rewriteArray, bool $dryRun, ComponentResult $result): void
     {
         $rewrite = $this->urlRewriteFactory->create();
         $successMessage = 'URL Rewrite: "%s" created';
+        $isUpdate = false;
         $rewriteCount = $rewrite->getCollection()
             ->addFieldToFilter(self::REQUEST_PATH_KEY, $rewriteArray[self::REQUEST_PATH_CSV_KEY])
             ->addFieldToFilter('store_id', $rewriteArray[self::STORE_ID_CSV_KEY])
@@ -166,6 +147,19 @@ class Rewrites implements ComponentInterface
                 ->getFirstItem();
 
             $successMessage = 'URL Rewrite: "%s" already exists, rewrite updated';
+            $isUpdate = true;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(
+                sprintf(
+                    '[dry-run] Would %s URL Rewrite: "%s"',
+                    $isUpdate ? 'update' : 'create',
+                    $rewriteArray[self::DESCRIPTION_CSV_KEY]
+                )
+            );
+            $isUpdate ? $result->recordUpdated() : $result->recordCreated();
+            return;
         }
 
         $rewrite->setIsAutogenerated(0)
@@ -179,35 +173,34 @@ class Rewrites implements ComponentInterface
         $this->log->logInfo(
             sprintf($successMessage, $rewriteArray[self::DESCRIPTION_CSV_KEY])
         );
+
+        $isUpdate ? $result->recordUpdated() : $result->recordCreated();
     }
 
     /**
-     * @param $attributeKeys
-     * @param $rewriteDataCsvRow
-     * @param $rewriteArray
-     * @return mixed
+     * @param array $attributeKeys
+     * @param array $rewriteDataCsvRow
+     * @param array $rewriteArray
+     * @return array
      */
-    public function extractCsvDataIntoArray($attributeKeys, $rewriteDataCsvRow, $rewriteArray)
-    {
+    public function extractCsvDataIntoArray(
+        array $attributeKeys,
+        array $rewriteDataCsvRow,
+        array $rewriteArray
+    ): array {
         foreach ($attributeKeys as $column => $code) {
             $rewriteArray[$code] = $rewriteDataCsvRow[$column];
         }
         return $rewriteArray;
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

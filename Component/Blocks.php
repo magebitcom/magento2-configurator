@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -27,23 +29,11 @@ use Symfony\Component\Filesystem\Filesystem;
 
 class Blocks implements ComponentInterface
 {
-
-    protected string $alias = 'blocks';
-    protected string $name = 'Blocks';
-    protected string $description = 'Component to create/maintain blocks.';
+    private const ALIAS = 'blocks';
+    private const DESCRIPTION = 'Component to create/maintain blocks.';
 
     protected $viewModelRegistry = null;
 
-    /**
-     * Blocks constructor.
-     * @param BlockInterfaceFactory $blockFactory
-     * @param Store $storeManager
-     * @param LoggerInterface $log
-     * @param Filesystem $filesystem
-     * @param Escaper $escaper
-     * @param VersionManagementInterface $versionManagement
-     * @param ObjectManagerInterface $objectManager
-     */
     public function __construct(
         private readonly BlockInterfaceFactory $blockFactory,
         private readonly Store $storeManager,
@@ -59,8 +49,6 @@ class Blocks implements ComponentInterface
     }
 
     /**
-     * @param null $data
-     * @param string $mode
      * @throws Exception
      */
     public function execute(ComponentContext $context): ComponentResult
@@ -69,9 +57,14 @@ class Blocks implements ComponentInterface
         $data = $context->getData();
         $mode = $context->getMode()->value;
 
+        if (!is_array($data)) {
+            $result->addError('No block data found in the source data.');
+            return $result;
+        }
+
         try {
-            foreach ($data as $identifier => $data) {
-                $this->processBlock($identifier, $data, $mode);
+            foreach ($data as $identifier => $blockData) {
+                $this->processBlock((string) $identifier, $blockData, $mode, $context->isDryRun(), $result);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -85,11 +78,18 @@ class Blocks implements ComponentInterface
      * @param string $identifier
      * @param array $blockData
      * @param string $mode
+     * @param bool $dryRun
+     * @param ComponentResult $result
      * @throws Exception
      * @SuppressWarnings(PHPMD)
      */
-    private function processBlock(string $identifier, array $blockData, string $mode = Processor::MODE_MAINTAIN): void
-    {
+    private function processBlock(
+        string $identifier,
+        array $blockData,
+        string $mode,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
         try {
             // Loop through the block data
             foreach ($blockData['block'] as $data) {
@@ -103,7 +103,7 @@ class Blocks implements ComponentInterface
                 $block = null;
 
                 $version = $data['version'] ?? null;
-                $versionId = $this->alias . '_' . $identifier;
+                $versionId = self::ALIAS . '_' . $identifier;
 
                 if (isset($data['stores'])) {
                     $versionId .= implode('_', $data['stores']);
@@ -128,6 +128,9 @@ class Blocks implements ComponentInterface
                     $block = $this->getBlockToProcess($identifier, $blocks, $stores);
                 }
 
+                // Track whether we are creating a new block or updating an existing one
+                $isNew = $block === null;
+
                 // If there is still no block to play with, create a new block object.
                 if ($block === null) {
                     $block = $this->blockFactory->create();
@@ -136,6 +139,7 @@ class Blocks implements ComponentInterface
                 } elseif ($mode === Processor::MODE_CREATE && !$isNewVersion) {
                     // In create mode we skip modifying block
                     $this->log->logComment(sprintf("'%s' Block exists, skip modifying it (create mode)", $identifier));
+                    $result->recordSkipped();
                     continue;
                 }
 
@@ -214,15 +218,33 @@ class Blocks implements ComponentInterface
 
                 // If we can save the block
                 if ($canSave) {
-                    $block->save();
-                    $this->log->logInfo(sprintf(
-                        "Save block %s",
-                        $identifier . ' (' . $block->getId() . ')'
-                    ));
+                    if ($dryRun) {
+                        $this->log->logInfo(sprintf(
+                            "[dry-run] Would %s block %s",
+                            $isNew ? 'create' : 'save',
+                            $identifier
+                        ));
+                    } else {
+                        $block->save();
+                        $this->log->logInfo(sprintf(
+                            "Save block %s",
+                            $identifier . ' (' . $block->getId() . ')'
+                        ));
+                    }
+
+                    $isNew ? $result->recordCreated() : $result->recordUpdated();
                 }
 
                 if ($version) {
-                    $this->versionManagement->setVersion($versionId, (int) $version);
+                    if ($dryRun) {
+                        $this->log->logInfo(sprintf(
+                            "[dry-run] Would set version %d for %s",
+                            (int) $version,
+                            $versionId
+                        ));
+                    } else {
+                        $this->versionManagement->setVersion($versionId, (int) $version);
+                    }
                 }
             }
         } catch (ComponentException $e) {
@@ -282,25 +304,19 @@ class Blocks implements ComponentInterface
         // Check if we get back a store ID.
         if (!$store->getId()) {
             // If not, stop the process by throwing an exception
-            throw new ComponentException(sprintf("No store with code '%s' found", $code));
+            throw new ComponentException((string) __("No store with code '%1' found", $code));
         }
 
         return $store;
     }
 
-    /**
-     * @return string
-     */
     public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
     public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

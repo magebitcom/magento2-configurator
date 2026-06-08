@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -13,50 +15,38 @@ use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
-use Magento\Framework\Exception\LocalizedException;
 use Magento\TaxImportExport\Model\Rate\CsvImportHandler;
 
 class TaxRates implements ComponentInterface
 {
-    protected $alias = 'taxrates';
-    protected $name = 'Tax Rates';
-    protected $description = 'Component to create Tax Rates';
+    private const ALIAS = 'taxrates';
+    private const DESCRIPTION = 'Component to create Tax Rates';
 
-    /**
-     * @var CsvImportHandler
-     */
-    protected $csvImportHandler;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * TaxRates constructor.
-     * @param CsvImportHandler $csvImportHandler
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        CsvImportHandler $csvImportHandler,
-        LoggerInterface $log
+        private readonly CsvImportHandler $csvImportHandler,
+        private readonly LoggerInterface $log
     ) {
-        $this->csvImportHandler = $csvImportHandler;
-        $this->log = $log;
     }
 
-    /**
-     * @param null $data
-     * @throws LocalizedException
-     */
     public function execute(ComponentContext $context): ComponentResult
     {
         $result = new ComponentResult();
         $data = $context->getData();
 
+        if (!isset($data[0])) {
+            $result->addError('No row data found.');
+            return $result;
+        }
+
         try {
             // Sort data into the column order importExport requires
             $sortedData = $this->getSortedData($data);
+
+            if ($context->isDryRun()) {
+                // Bulk CSV import: skip both the temp-file write and the import.
+                $this->log->logInfo('[dry-run] Would import tax rates from a generated CSV file.');
+                return $result;
+            }
 
             // Generate sorted csv file
             $tmpFile = $this->getTmpFile($sortedData);
@@ -138,19 +128,13 @@ class TaxRates implements ComponentInterface
         return $tmpFile;
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

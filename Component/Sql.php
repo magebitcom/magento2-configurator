@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -19,57 +21,22 @@ use Magebit\Configurator\Model\ComponentResult;
  */
 class Sql implements ComponentInterface
 {
-    /**
-     * @var string
-     */
-    protected $alias = 'sql';
+    private const ALIAS = 'sql';
+    private const DESCRIPTION = 'Component for an execution of custom queries';
 
-    /**
-     * @var string
-     */
-    protected $name = 'Custom Sql';
-
-    /**
-     * @var string
-     */
-    protected $description = 'Component for an execution of custom queries';
-
-    /**
-     * @var SqlSplitProcessor
-     */
-    private $processor;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * Sql constructor.
-     * @param SqlSplitProcessor $processor
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        SqlSplitProcessor $processor,
-        LoggerInterface $log
+        private readonly SqlSplitProcessor $processor,
+        private readonly LoggerInterface $log
     ) {
-        $this->processor = $processor;
-        $this->log = $log;
     }
 
-    /**
-     * This method should be used to process the data and populate the Magento Database.
-     *
-     * @param mixed $data
-     *
-     * @return void
-     */
     public function execute(ComponentContext $context): ComponentResult
     {
         $result = new ComponentResult();
         $data = $context->getData();
 
-        if (!isset($data['sql'])) {
+        if (!isset($data['sql']) || !is_array($data['sql'])) {
+            $result->addError('No "sql" node found in the source data.');
             return $result;
         }
 
@@ -81,25 +48,27 @@ class Sql implements ComponentInterface
                 $this->log->logError("{$path} does not exist. Skipping.");
                 continue;
             }
-            $this->processor->process($name, $path);
+
+            if ($context->isDryRun()) {
+                $this->log->logInfo(sprintf('[dry-run] Would execute SQL file "%s" (%s)', $name, $path));
+                $result->recordCreated();
+                continue;
+            }
+
+            $this->processor->process((string) $name, $path);
+            $result->recordCreated();
         }
 
         return $result;
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

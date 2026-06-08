@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -28,27 +30,8 @@ use Magento\Store\Model\GroupFactory;
  */
 class Categories implements ComponentInterface
 {
-    protected string $alias = 'categories';
-    protected string $name = 'Categories';
-    protected string $description = 'Component to import categories.';
-
-    /** @var GroupFactory */
-    private GroupFactory $groupFactory;
-
-    /** @var DirectoryList */
-    private DirectoryList $dirList;
-
-    /** @var CategoryFactory */
-    private CategoryFactory $category;
-
-    /** @var LoggerInterface */
-    private LoggerInterface $log;
-
-    /** @var BlockFactory */
-    private BlockFactory $blockFactory;
-
-    /** @var BlockResource */
-    private BlockResource $blockResource;
+    private const ALIAS = 'categories';
+    private const DESCRIPTION = 'Component to import categories.';
 
     private array $mainAttributes = [
         'name',
@@ -60,35 +43,17 @@ class Categories implements ComponentInterface
         'custom_use_parent_settings',
     ];
 
-    /**
-     * Categories constructor.
-     * @param CategoryFactory $category
-     * @param GroupFactory $groupFactory
-     * @param DirectoryList $dirList
-     * @param LoggerInterface $log
-     * @param BlockFactory $blockFactory
-     * @param BlockResource $blockResource
-     */
     public function __construct(
-        CategoryFactory $category,
-        GroupFactory $groupFactory,
-        DirectoryList $dirList,
-        LoggerInterface $log,
-        BlockFactory $blockFactory,
-        BlockResource $blockResource
+        private readonly CategoryFactory $category,
+        private readonly GroupFactory $groupFactory,
+        private readonly DirectoryList $dirList,
+        private readonly LoggerInterface $log,
+        private readonly BlockFactory $blockFactory,
+        private readonly BlockResource $blockResource
     ) {
-        $this->category = $category;
-        $this->groupFactory = $groupFactory;
-        $this->dirList = $dirList;
-        $this->log = $log;
-        $this->blockFactory = $blockFactory;
-        $this->blockResource = $blockResource;
     }
 
     /**
-     * @param $data
-     * @param string $mode
-     * @return void
      * @throws FileSystemException
      */
     public function execute(ComponentContext $context): ComponentResult
@@ -97,25 +62,28 @@ class Categories implements ComponentInterface
         $data = $context->getData();
         $mode = $context->getMode()->value;
 
-        if (isset($data['categories'])) {
-            foreach ($data['categories'] as $store) {
-                try {
-                    $group = $this->getStoreGroup($store);
-                    // Get the default category
-                    $category = $this->getDefaultCategory($group);
-                    if ($category === false) {
-                        throw new ComponentException(
-                            sprintf('No default category was found for the store group "%s"', $group)
-                        );
-                    }
-                    if (isset($store['categories'])) {
-                        $this->log->logInfo(sprintf('Updating categories for "%s"', $group));
-                        $this->createOrUpdateCategory($category, $store['categories'], $mode);
-                    }
-                } catch (ComponentException $e) {
-                    $this->log->logError($e->getMessage());
-                    $result->addError($e->getMessage());
+        if (!isset($data['categories']) || !is_array($data['categories'])) {
+            $result->addError('No "categories" node found in the source data.');
+            return $result;
+        }
+
+        foreach ($data['categories'] as $store) {
+            try {
+                $group = $this->getStoreGroup($store);
+                // Get the default category
+                $category = $this->getDefaultCategory($group);
+                if ($category === false) {
+                    throw new ComponentException(
+                        (string) __('No default category was found for the store group "%1"', $group)
+                    );
                 }
+                if (isset($store['categories'])) {
+                    $this->log->logInfo(sprintf('Updating categories for "%s"', $group));
+                    $this->createOrUpdateCategory($category, $store['categories'], $mode, $context->isDryRun(), $result);
+                }
+            } catch (ComponentException $e) {
+                $this->log->logError($e->getMessage());
+                $result->addError($e->getMessage());
             }
         }
 
@@ -141,12 +109,12 @@ class Categories implements ComponentInterface
         }
         if ($groupCollection->getSize() > 1) {
             throw new ComponentException(
-                sprintf('Multiple store groups were found with the name "%s"', $store)
+                (string) __('Multiple store groups were found with the name "%1"', $store)
             );
         }
         if ($groupCollection->getSize() === 0) {
             throw new ComponentException(
-                sprintf('No store groups were found with the name "%s"', $store)
+                (string) __('No store groups were found with the name "%1"', $store)
             );
         }
         return false;
@@ -158,14 +126,18 @@ class Categories implements ComponentInterface
      * @param Category $parentCategory
      * @param array $categories
      * @param string $mode
+     * @param bool $dryRun
+     * @param ComponentResult $result
      * @return void
      * @throws FileSystemException
      * @SuppressWarnings(PHPMD)
      */
     public function createOrUpdateCategory(
         Category $parentCategory,
-        array    $categories = [],
-        string $mode = Processor::MODE_MAINTAIN
+        array $categories,
+        string $mode,
+        bool $dryRun,
+        ComponentResult $result
     ): void {
         foreach ($categories as $categoryValues) {
             // Load the category using its name and parent category
@@ -178,8 +150,11 @@ class Categories implements ComponentInterface
                 ->setPageSize(1)
                 ->getFirstItem();
 
-            if ($category->getId() && $mode === Processor::MODE_CREATE) {
+            $exists = (bool) $category->getId();
+
+            if ($exists && $mode === Processor::MODE_CREATE) {
                 $this->log->logComment(sprintf("Skip category '%s' modification in create mode: ", $categoryValues['name']));
+                $result->recordSkipped();
                 continue;
             }
 
@@ -239,15 +214,24 @@ class Categories implements ComponentInterface
             $category->setParentId($parentCategory->getId());
             // Update category in default scope
             $category->setStoreId(0);
-            $category->save();
 
-            $this->log->logInfo(
-                sprintf('Updated category %s', $category->getName()),
-                ($category->getLevel() - 1)
-            );
+            if ($dryRun) {
+                $this->log->logInfo(
+                    sprintf('[dry-run] Would %s category %s', $exists ? 'update' : 'create', $categoryValues['name'])
+                );
+                $exists ? $result->recordUpdated() : $result->recordCreated();
+            } else {
+                $category->save();
+
+                $this->log->logInfo(
+                    sprintf('Updated category %s', $category->getName()),
+                    ($category->getLevel() - 1)
+                );
+                $exists ? $result->recordUpdated() : $result->recordCreated();
+            }
 
             if (isset($categoryValues['categories'])) {
-                $this->createOrUpdateCategory($category, $categoryValues['categories']);
+                $this->createOrUpdateCategory($category, $categoryValues['categories'], $mode, $dryRun, $result);
             }
         }
     }
@@ -264,19 +248,13 @@ class Categories implements ComponentInterface
         return 'Main Website Store';
     }
 
-    /**
-     * @return string
-     */
     public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
     public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

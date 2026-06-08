@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -24,57 +26,32 @@ use Magento\Sales\Model\ResourceModel\Order\StatusFactory as StatusResourceFacto
  */
 class OrderStatuses implements ComponentInterface
 {
-    protected $alias = 'order_statuses';
-    protected $name = 'Order Statuses';
-    protected $description = 'Component to create custom order statuses';
+    private const ALIAS = 'order_statuses';
+    private const DESCRIPTION = 'Component to create custom order statuses';
 
-    /**
-     * @var StatusFactory
-     */
-    protected $statusFactory;
-
-    /**
-     * @var StatusResourceFactory
-     */
-    protected $statusResourceFactory;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * OrderStatuses constructor.
-     * @param StatusFactory $statusFactory
-     * @param StatusResourceFactory $statusResourceFactory
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        StatusFactory $statusFactory,
-        StatusResourceFactory $statusResourceFactory,
-        LoggerInterface $log
+        private readonly StatusFactory $statusFactory,
+        private readonly StatusResourceFactory $statusResourceFactory,
+        private readonly LoggerInterface $log
     ) {
-        $this->statusFactory = $statusFactory;
-        $this->statusResourceFactory = $statusResourceFactory;
-        $this->log = $log;
     }
 
-    /**
-     * @param $data
-     */
     public function execute(ComponentContext $context): ComponentResult
     {
         $result = new ComponentResult();
         $data = $context->getData();
 
-        if (isset($data['order_statuses'])) {
-            foreach ($data['order_statuses'] as $statusSet) {
-                try {
-                    $this->createOrderStatuses($statusSet);
-                } catch (ComponentException $e) {
-                    $this->log->logError($e->getMessage());
-                    $result->addError($e->getMessage());
-                }
+        if (!isset($data['order_statuses']) || !is_array($data['order_statuses'])) {
+            $result->addError('No "order_statuses" node found in the source data.');
+            return $result;
+        }
+
+        foreach ($data['order_statuses'] as $statusSet) {
+            try {
+                $this->createOrderStatuses($statusSet, $context->isDryRun(), $result);
+            } catch (ComponentException $e) {
+                $this->log->logError($e->getMessage());
+                $result->addError($e->getMessage());
             }
         }
 
@@ -82,12 +59,20 @@ class OrderStatuses implements ComponentInterface
     }
 
     /**
-     * @param $statusSet
+     * @param array $statusSet
      * @throws \Magento\Framework\Exception\AlreadyExistsException
      */
-    public function createOrderStatuses($statusSet)
+    public function createOrderStatuses(array $statusSet, bool $dryRun, ComponentResult $result): void
     {
         foreach ($statusSet['statuses'] as $statusData) {
+            if ($dryRun) {
+                $this->log->logInfo(
+                    sprintf('[dry-run] Would create order status %s', $statusData['name'])
+                );
+                $result->recordCreated();
+                continue;
+            }
+
             /** @var StatusResource $statusResource */
             $statusResource = $this->statusResourceFactory->create();
             /** @var Status $status */
@@ -108,22 +93,17 @@ class OrderStatuses implements ComponentInterface
             $this->log->logInfo(
                 sprintf('Order status %s created', $statusData['name'])
             );
+            $result->recordCreated();
         }
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

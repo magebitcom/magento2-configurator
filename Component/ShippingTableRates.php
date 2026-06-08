@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -21,59 +23,29 @@ use Magento\Directory\Model\Region;
 
 class ShippingTableRates implements ComponentInterface
 {
-    protected $alias = "shippingtablerates";
-    protected $name = "Shipping Table Rates";
-    protected $description = "Component to create and maintain Shipping Table Rates";
+    private const ALIAS = 'shippingtablerates';
+    private const DESCRIPTION = 'Component to create and maintain Shipping Table Rates';
 
-    /**
-     * @var TablerateFactory
-     */
-    protected $tablerateFactory;
-
-    /**
-     * @var WebsiteFactory
-     */
-    protected $websiteFactory;
-
-    /**
-     * @var RegionFactory
-     */
-    protected $regionFactory;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * ShippingTableRates constructor.
-     * @param TablerateFactory $tablerateFactory
-     * @param WebsiteFactory $websiteFactory
-     * @param RegionFactory $regionFactory
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        TablerateFactory $tablerateFactory,
-        WebsiteFactory $websiteFactory,
-        RegionFactory $regionFactory,
-        LoggerInterface $log
+        private readonly TablerateFactory $tablerateFactory,
+        private readonly WebsiteFactory $websiteFactory,
+        private readonly RegionFactory $regionFactory,
+        private readonly LoggerInterface $log
     ) {
-        $this->tablerateFactory = $tablerateFactory;
-        $this->websiteFactory = $websiteFactory;
-        $this->regionFactory = $regionFactory;
-        $this->log = $log;
     }
 
     /**
      * This method should be used to process the data and populate the Magento Database.
-     *
-     * @param array $data
-     * @return void
      */
     public function execute(ComponentContext $context): ComponentResult
     {
         $result = new ComponentResult();
         $data = $context->getData();
+
+        if ($data === []) {
+            $result->addError('No shipping table rate data found in the source data.');
+            return $result;
+        }
 
         /** @var Tablerate $tablerateModel */
         $tablerateModel = $this->tablerateFactory->create();
@@ -94,10 +66,12 @@ class ShippingTableRates implements ComponentInterface
             foreach ($shippingRates as $shippingRate) {
                 $this->createNewShippingTableRate(
                     $shippingRate,
-                    $websiteId,
+                    (int) $websiteId,
                     $shippingRateCount,
-                    $website,
-                    $tablerateModel
+                    (string) $website,
+                    $tablerateModel,
+                    $context->isDryRun(),
+                    $result
                 );
                 $shippingRateCount++;
             }
@@ -107,19 +81,18 @@ class ShippingTableRates implements ComponentInterface
     }
 
     /**
-     * @param $shippingRate
-     * @param $websiteId
-     * @param $shippingRateCount
-     * @param $website
+     * @param array $shippingRate
      * @param Tablerate $tablerateModel
      */
     private function createNewShippingTableRate(
-        $shippingRate,
-        $websiteId,
-        $shippingRateCount,
-        $website,
-        Tablerate $tablerateModel
-    ) {
+        array $shippingRate,
+        int $websiteId,
+        int $shippingRateCount,
+        string $website,
+        Tablerate $tablerateModel,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
         $columns = [
             'website_id',
             'dest_region_id',
@@ -131,7 +104,7 @@ class ShippingTableRates implements ComponentInterface
             'cost'
         ];
 
-        /** @var Region */
+        /** @var Region $regionModel */
         $regionModel = $this->regionFactory->create();
         $regionModel = $regionModel->loadByCode($shippingRate['dest_region_code'], $shippingRate['dest_country_id']);
         $regionId = $regionModel->getId();
@@ -149,6 +122,18 @@ class ShippingTableRates implements ComponentInterface
             $shippingRate
         );
 
+        if ($dryRun) {
+            $this->log->logInfo(
+                sprintf(
+                    "[dry-run] Would create shipping rate #%s for website %s",
+                    $shippingRateCount,
+                    $website
+                )
+            );
+            $result->recordCreated();
+            return;
+        }
+
         $this->log->logInfo(
             sprintf(
                 "Shipping rate #%s for website %s being created",
@@ -158,29 +143,26 @@ class ShippingTableRates implements ComponentInterface
         );
         $tablerateModel->getConnection()
             ->insertOnDuplicate($tablerateModel->getMainTable(), [$shippingRate], $columns);
+
+        $result->recordCreated();
     }
+
     /**
      * @param array $shippingRate
      */
-    private function removeYamlKeysFromDatabaseInsert(array &$shippingRate)
+    private function removeYamlKeysFromDatabaseInsert(array &$shippingRate): void
     {
         unset($shippingRate['dest_region_code']);
         unset($shippingRate['website_code']);
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

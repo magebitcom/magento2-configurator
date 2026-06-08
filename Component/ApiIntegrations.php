@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -23,90 +25,46 @@ use Magebit\Configurator\Model\ComponentResult;
  */
 class ApiIntegrations implements ComponentInterface
 {
-    protected $alias = 'apiintegrations';
-    protected $name = 'Api Integrations';
-    protected $description = 'Component to create Api Integrations';
+    private const ALIAS = 'apiintegrations';
+    private const DESCRIPTION = 'Component to create Api Integrations';
 
-    /**
-     * @var  IntegrationServiceInterface
-     */
-    protected $integrationService;
-
-    /**
-     * @var IntegrationFactory
-     */
-    protected $integrationFactory;
-
-    /**
-     * @var AuthorizationService
-     */
-    protected $authorizationService;
-
-    /**
-     * @var TokenFactory
-     */
-    protected $tokenFactory;
-
-    /**
-     * @var LoggerInterface
-     */
-    protected $log;
-
-    /**
-     * ApiIntegrations constructor.
-     * @param IntegrationFactory $integrationFactory
-     * @param IntegrationServiceInterface $integrationService
-     * @param AuthorizationService $authorizationService
-     * @param TokenFactory $tokenFactory
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        IntegrationFactory $integrationFactory,
-        IntegrationServiceInterface $integrationService,
-        AuthorizationService $authorizationService,
-        TokenFactory $tokenFactory,
-        LoggerInterface $log
+        private readonly IntegrationFactory $integrationFactory,
+        private readonly IntegrationServiceInterface $integrationService,
+        private readonly AuthorizationService $authorizationService,
+        private readonly TokenFactory $tokenFactory,
+        private readonly LoggerInterface $log
     ) {
-        $this->integrationFactory = $integrationFactory;
-        $this->integrationService = $integrationService;
-        $this->authorizationService = $authorizationService;
-        $this->tokenFactory = $tokenFactory;
-        $this->log = $log;
     }
 
-    /**
-     * @param array $data
-     */
     public function execute(ComponentContext $context): ComponentResult
     {
         $result = new ComponentResult();
         $data = $context->getData();
 
-        if (isset($data['apiintegrations'])) {
-            foreach ($data['apiintegrations'] as $integrationData) {
-                try {
-                    if (!isset($integrationData['name'])) {
-                        $this->log->logError(
-                            sprintf('Api Integration requires a Name to be set')
-                        );
-                        continue;
-                    }
+        if (!isset($data['apiintegrations']) || !is_array($data['apiintegrations'])) {
+            $result->addError('No "apiintegrations" node found in the source data.');
+            return $result;
+        }
 
-                    $this->createApiIntegration($integrationData);
-                } catch (ComponentException $e) {
-                    $this->log->logError($e->getMessage());
-                    $result->addError($e->getMessage());
+        foreach ($data['apiintegrations'] as $integrationData) {
+            try {
+                if (!isset($integrationData['name'])) {
+                    $this->log->logError('Api Integration requires a Name to be set');
+                    continue;
                 }
+
+                $this->createApiIntegration($integrationData, $context->isDryRun(), $result);
+            } catch (ComponentException $e) {
+                $this->log->logError($e->getMessage());
+                $result->addError($e->getMessage());
             }
         }
 
         return $result;
     }
 
-    /**
-     * @param array $integrationData
-     */
-    private function createApiIntegration(array $integrationData)
+    private function createApiIntegration(array $integrationData, bool $dryRun, ComponentResult $result): void
     {
         $integration = $this->integrationFactory->create();
         $integrationCount = $integration->getCollection()
@@ -122,7 +80,16 @@ class ApiIntegrations implements ComponentInterface
             $this->log->logComment(
                 sprintf('API Integration "%s" already exists: Creation skipped', $integration->getName())
             );
+            $result->recordSkipped();
 
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(
+                sprintf('[dry-run] Would create API Integration "%s"', $integrationData['name'])
+            );
+            $result->recordCreated();
             return;
         }
 
@@ -133,6 +100,7 @@ class ApiIntegrations implements ComponentInterface
         $this->log->logInfo(
             sprintf('API Integration "%s" created', $integrationData['name'])
         );
+        $result->recordCreated();
 
         $this->setPermissions($integrationId, $integrationData['resources']);
         $this->activateAndAuthorize($integration->getConsumerId());
@@ -144,13 +112,10 @@ class ApiIntegrations implements ComponentInterface
 
     /**
      * Prepare data for integrationFactory creation
-     *
-     * @param array $integrationData
-     * @return array
      */
-    private function convertToUseableData(array $integrationData)
+    private function convertToUseableData(array $integrationData): array
     {
-        $data = [
+        return [
             'name' => $integrationData['name'],
             'email' => $integrationData['email'],
             'status' => '1',
@@ -158,17 +123,12 @@ class ApiIntegrations implements ComponentInterface
             'identity_link_url' => $integrationData['identityurl'],
             'setup_type' => 0
         ];
-
-        return $data;
     }
 
     /**
      * Set permissions for API Integration
-     *
-     * @param $integrationId
-     * @param array $resources
      */
-    private function setPermissions($integrationId, ?array $resources = null)
+    private function setPermissions($integrationId, ?array $resources = null): void
     {
         $authorizationService = $this->authorizationService;
         $authorizationService->grantPermissions($integrationId, $resources);
@@ -176,10 +136,8 @@ class ApiIntegrations implements ComponentInterface
 
     /**
      * Activate and Authorize the Integration
-     *
-     * @param $consumerId
      */
-    private function activateAndAuthorize($consumerId)
+    private function activateAndAuthorize($consumerId): void
     {
         $token = $this->tokenFactory->create();
         $token->createVerifierToken($consumerId);
@@ -187,19 +145,13 @@ class ApiIntegrations implements ComponentInterface
         $token->save();
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

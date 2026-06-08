@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -22,62 +24,27 @@ use Magento\Tax\Model\ClassModelFactory;
  */
 class TaxRules implements ComponentInterface
 {
-    protected $alias = 'taxrules';
-    protected $name = 'Tax Rules';
-    protected $description = 'Component to create Tax Rules';
+    private const ALIAS = 'taxrules';
+    private const DESCRIPTION = 'Component to create Tax Rules';
 
     /**
      * Defines Customer Tax Class string
      */
-    const TAX_CLASS_TYPE_CUSTOMER = 'CUSTOMER';
+    public const TAX_CLASS_TYPE_CUSTOMER = 'CUSTOMER';
 
     /**
      * Defines Product Tax Class string
      */
-    const TAX_CLASS_TYPE_PRODUCT = 'PRODUCT';
+    public const TAX_CLASS_TYPE_PRODUCT = 'PRODUCT';
 
-    /**
-     * @var RateFactory
-     */
-    protected $rateFactory;
-
-    /**
-     * @var RuleFactory
-     */
-    protected $ruleFactory;
-
-    /**
-     * @var ClassModelFactory
-     */
-    protected $classModelFactory;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * TaxRules constructor.
-     * @param RateFactory $rateFactory
-     * @param ClassModelFactory $classModelFactory
-     * @param RuleFactory $ruleFactory
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        RateFactory $rateFactory,
-        ClassModelFactory $classModelFactory,
-        RuleFactory $ruleFactory,
-        LoggerInterface $log
+        private readonly RateFactory $rateFactory,
+        private readonly ClassModelFactory $classModelFactory,
+        private readonly RuleFactory $ruleFactory,
+        private readonly LoggerInterface $log
     ) {
-        $this->rateFactory = $rateFactory;
-        $this->classModelFactory = $classModelFactory;
-        $this->ruleFactory = $ruleFactory;
-        $this->log = $log;
     }
 
-    /**
-     * @param array|null $data
-     */
     public function execute(ComponentContext $context): ComponentResult
     {
         $result = new ComponentResult();
@@ -85,9 +52,8 @@ class TaxRules implements ComponentInterface
 
         //Check Row Data exists
         if (!isset($data[0])) {
-            throw new ComponentException(
-                sprintf('No row data found.')
-            );
+            $result->addError('No row data found.');
+            return $result;
         }
 
         $taxRuleAttributes = $this->getAttributesFromCsv($data[0]);
@@ -98,14 +64,15 @@ class TaxRules implements ComponentInterface
                 $this->log->logError(
                     sprintf('Tax Rule creation skipped: Code is a required field')
                 );
+                $result->recordSkipped();
 
                 continue;
             }
 
-            $ruleData = $this->formatArray($taxRuleAttributes, $rule);
+            $ruleData = $this->formatArray($taxRuleAttributes, $rule, $context->isDryRun());
 
             try {
-                $this->createTaxRule($ruleData);
+                $this->createTaxRule($ruleData, $context, $result);
             } catch (ComponentException $e) {
                 $this->log->logError($e->getMessage());
                 $result->addError($e->getMessage());
@@ -122,10 +89,10 @@ class TaxRules implements ComponentInterface
     /**
      * Gets the first row of the CSV file as these should be the attribute keys
      *
-     * @param null $data
+     * @param array $data
      * @return array
      */
-    public function getAttributesFromCsv($data = null)
+    public function getAttributesFromCsv(array $data): array
     {
         $attributes = [];
         foreach ($data as $attributeCode) {
@@ -141,7 +108,7 @@ class TaxRules implements ComponentInterface
      * @param array $rule
      * @return array
      */
-    private function formatArray(array $taxRuleAttributes, array $rule)
+    private function formatArray(array $taxRuleAttributes, array $rule, bool $dryRun): array
     {
         $ruleData = [];
 
@@ -159,15 +126,16 @@ class TaxRules implements ComponentInterface
 
         $ruleData['tax_rate_ids'] = $this->getRateIdsFromCode($ruleData['tax_rate_ids']);
 
-        //TODO if Tax ID not found, create it
         $ruleData['customer_tax_class_ids'] = $this->taxClassIdsFromName(
             self::TAX_CLASS_TYPE_CUSTOMER,
-            $ruleData['customer_tax_class_ids']
+            $ruleData['customer_tax_class_ids'],
+            $dryRun
         );
 
         $ruleData['product_tax_class_ids'] = $this->taxClassIdsFromName(
             self::TAX_CLASS_TYPE_PRODUCT,
-            $ruleData['product_tax_class_ids']
+            $ruleData['product_tax_class_ids'],
+            $dryRun
         );
 
         return $ruleData;
@@ -176,10 +144,10 @@ class TaxRules implements ComponentInterface
     /**
      * Use Rate code to get Rate ID
      *
-     * @param null $rateNames
+     * @param string $rateNames
      * @return array
      */
-    private function getRateIdsFromCode($rateNames = null)
+    private function getRateIdsFromCode(string $rateNames): array
     {
         $rateIds = [];
         $rateNamesArray = explode(',', $rateNames);
@@ -196,11 +164,11 @@ class TaxRules implements ComponentInterface
     /**
      * Use TaxClass name to get TaxClass Id
      *
-     * @param $type
-     * @param null $names
+     * @param string $type
+     * @param string $names
      * @return array
      */
-    private function taxClassIdsFromName($type, $names = null)
+    private function taxClassIdsFromName(string $type, string $names, bool $dryRun): array
     {
         $taxClassIds = [];
         $taxClassNamesArray = explode(',', $names);
@@ -212,6 +180,13 @@ class TaxRules implements ComponentInterface
             $classId = $class->getId();
 
             if ($classId == 0) {
+                if ($dryRun) {
+                    // Don't create the missing tax class during a dry run; the rule
+                    // that depends on it won't be created either.
+                    $this->log->logInfo(sprintf('[dry-run] Would create missing tax class "%s"', $name));
+                    continue;
+                }
+
                 $classModel->setClassName($name)
                     ->setClassType($type)
                     ->save();
@@ -228,8 +203,10 @@ class TaxRules implements ComponentInterface
      * Create TaxRule
      *
      * @param array $ruleData
+     * @param ComponentContext $context
+     * @param ComponentResult $result
      */
-    private function createTaxRule(array $ruleData)
+    private function createTaxRule(array $ruleData, ComponentContext $context, ComponentResult $result): void
     {
         $rule = $this->ruleFactory->create();
         $ruleCount = $rule->getCollection()->addFieldToFilter('code', $ruleData['code'])->getSize();
@@ -238,6 +215,16 @@ class TaxRules implements ComponentInterface
             $this->log->logComment(
                 sprintf('Tax Rule "%s" already exists in database.', $ruleData['code'])
             );
+            $result->recordSkipped();
+
+            return;
+        }
+
+        if ($context->isDryRun()) {
+            $this->log->logInfo(
+                sprintf('[dry-run] Would create Tax Rule "%s".', $ruleData['code'])
+            );
+            $result->recordCreated();
 
             return;
         }
@@ -254,21 +241,16 @@ class TaxRules implements ComponentInterface
         $this->log->logInfo(
             sprintf('Tax Rule "%s" created.', $ruleData['code'])
         );
+        $result->recordCreated();
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

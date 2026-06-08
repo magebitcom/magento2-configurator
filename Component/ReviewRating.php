@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -28,59 +30,18 @@ class ReviewRating implements ComponentInterface
 {
     const MAX_NUM_RATINGS = 5;
 
-    protected $alias = 'review_rating';
+    private const ALIAS = 'review_rating';
+    private const DESCRIPTION = 'Component to create review ratings';
 
-    protected $name = 'Review Rating';
+    private ?int $entityId = null;
 
-    protected $description = 'Component to create review ratings';
-
-    protected $entityId;
-
-    /**
-     * @var RatingFactory
-     */
-    protected $ratingFactory;
-
-    /**
-     * @var StoreRepository
-     */
-    protected $storeRepository;
-
-    /**
-     * @var OptionFactory
-     */
-    protected $optionFactory;
-
-    /**
-     * @var EntityFactory
-     */
-    protected $entityFactory;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * ReviewRating constructor.
-     * @param RatingFactory $ratingFactory
-     * @param StoreRepositoryInterface $storeRepository
-     * @param OptionFactory $optionFactory
-     * @param EntityFactory $entityFactory
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        RatingFactory $ratingFactory,
-        StoreRepositoryInterface $storeRepository,
-        OptionFactory $optionFactory,
-        EntityFactory $entityFactory,
-        LoggerInterface $log
+        private readonly RatingFactory $ratingFactory,
+        private readonly StoreRepositoryInterface $storeRepository,
+        private readonly OptionFactory $optionFactory,
+        private readonly EntityFactory $entityFactory,
+        private readonly LoggerInterface $log
     ) {
-        $this->ratingFactory = $ratingFactory;
-        $this->storeRepository = $storeRepository;
-        $this->optionFactory = $optionFactory;
-        $this->entityFactory = $entityFactory;
-        $this->log = $log;
     }
 
     public function execute(ComponentContext $context): ComponentResult
@@ -88,18 +49,31 @@ class ReviewRating implements ComponentInterface
         $result = new ComponentResult();
         $data = $context->getData();
 
+        if (!isset($data['review_rating']) || !is_array($data['review_rating'])) {
+            $result->addError('No "review_rating" node found in the source data.');
+            return $result;
+        }
+
         $reviewRatings = $this->getReviewRatings($data);
+        $dryRun = $context->isDryRun();
 
         foreach ($reviewRatings as $code => $reviewRating) {
             try {
-                /**
-                 * @var Rating $ratingModel
-                 */
-                $ratingModel = $this->getReviewRating($code);
-                $ratingModel = $this->updateOrCreateRating($ratingModel, $code, $reviewRating);
+                /** @var Rating $ratingModel */
+                $ratingModel = $this->getReviewRating((string) $code);
+                $existed = (bool) $ratingModel->getId();
+                $ratingModel = $this->updateOrCreateRating($ratingModel, (string) $code, $reviewRating);
+
+                if ($dryRun) {
+                    $this->log->logInfo(sprintf('[dry-run] Would update review rating "%s"', $code));
+                    $existed ? $result->recordUpdated() : $result->recordCreated();
+                    continue;
+                }
+
                 $ratingModel->save();
-                $this->setOptions($ratingModel);
-                $this->log->logInfo(__('Updated review rating "%1"', $code));
+                $this->setOptions($ratingModel, $dryRun);
+                $this->log->logInfo((string) __('Updated review rating "%1"', $code));
+                $existed ? $result->recordUpdated() : $result->recordCreated();
             } catch (\Exception $e) {
                 $this->log->logError(
                     sprintf(
@@ -108,6 +82,7 @@ class ReviewRating implements ComponentInterface
                         $e->getMessage()
                     )
                 );
+                $result->addError($e->getMessage());
             }
         }
 
@@ -117,11 +92,10 @@ class ReviewRating implements ComponentInterface
     /**
      * Get the review criteria
      *
-     * @param $data
-     *
-     * @return []
+     * @param array $data
+     * @return array
      */
-    public function getReviewRatings($data)
+    public function getReviewRatings(array $data): array
     {
         if (isset($data['review_rating'])) {
             return $data['review_rating'];
@@ -130,15 +104,12 @@ class ReviewRating implements ComponentInterface
     }
 
     /**
-     * @param $reviewRatingCode
-     *
+     * @param string $reviewRatingCode
      * @return Rating
      */
-    public function getReviewRating($reviewRatingCode)
+    public function getReviewRating(string $reviewRatingCode): Rating
     {
-        /**
-         * @var Rating $rating
-         */
+        /** @var Rating $rating */
         $rating = $this->ratingFactory->create();
         $rating->load($reviewRatingCode, 'rating_code');
         return $rating;
@@ -146,12 +117,11 @@ class ReviewRating implements ComponentInterface
 
     /**
      * @param Rating $rating
-     * @param $ratingCode
-     * @param $ratingData
-     *
+     * @param string $ratingCode
+     * @param array $ratingData
      * @return Rating
      */
-    public function updateOrCreateRating(Rating $rating, $ratingCode, $ratingData)
+    public function updateOrCreateRating(Rating $rating, string $ratingCode, array $ratingData): Rating
     {
         $rating->setRatingCode($ratingCode);
         $reviewEntityId = $this->getReviewEntityId();
@@ -181,7 +151,7 @@ class ReviewRating implements ComponentInterface
      *
      * @param Rating $rating
      */
-    protected function setOptions(Rating $rating)
+    protected function setOptions(Rating $rating, bool $dryRun): void
     {
         $ratingOptions = $rating->getOptions();
         if (count($ratingOptions) === self::MAX_NUM_RATINGS) {
@@ -196,9 +166,15 @@ class ReviewRating implements ComponentInterface
             if (in_array($count, $alreadyCreated)) {
                 continue;
             }
-            /**
-             * @var Option $option
-             */
+
+            if ($dryRun) {
+                $this->log->logInfo(
+                    sprintf('[dry-run] Would create rating option %d for rating "%s"', $count, $rating->getRatingCode())
+                );
+                continue;
+            }
+
+            /** @var Option $option */
             $option = $this->optionFactory->create();
             $option->setRatingId($rating->getId());
             $option->setCode($count);
@@ -209,16 +185,15 @@ class ReviewRating implements ComponentInterface
     }
 
     /**
-     * @param $storeCodes
-     *
+     * @param array|string $storeCodes
      * @return array
      */
-    public function getStoresByCodes($storeCodes)
+    public function getStoresByCodes($storeCodes): array
     {
         $storesResponse = [];
 
         if (!is_array($storeCodes)) {
-            $storeCodes[] = $storeCodes;
+            $storeCodes = [$storeCodes];
         }
 
         foreach ($storeCodes as $storeCode) {
@@ -234,31 +209,23 @@ class ReviewRating implements ComponentInterface
      *
      * @return int
      */
-    private function getReviewEntityId()
+    private function getReviewEntityId(): int
     {
         if ($this->entityId === null) {
-            /**
-             * @var Entity $entity
-             */
+            /** @var Entity $entity */
             $entity = $this->entityFactory->create();
-            $this->entityId = $entity->getIdByCode('product');
+            $this->entityId = (int) $entity->getIdByCode('product');
         }
         return $this->entityId;
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

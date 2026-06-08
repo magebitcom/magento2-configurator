@@ -6,6 +6,8 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
@@ -24,59 +26,19 @@ use Magento\Framework\Event\ManagerInterface;
 
 class Websites implements ComponentInterface
 {
-    protected $alias = 'websites';
-    protected $name = 'Websites';
-    protected $description = 'Component to manage Websites, Stores and Store Views';
-    protected $indexer;
-    protected $reindex = false;
-    /**
-     * @var \Magento\Framework\Event\ManagerInterface
-     */
-    protected $eventManager;
+    private const ALIAS = 'websites';
+    private const DESCRIPTION = 'Component to manage Websites, Stores and Store Views';
 
-    /**
-     * @var WebsiteFactory
-     */
-    protected $websiteFactory;
+    private bool $reindex = false;
 
-    /**
-     * @var StoreFactory
-     */
-    protected $storeFactory;
-
-    /**
-     * @var GroupFactory
-     */
-    protected $groupFactory;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * Websites constructor.
-     * @param IndexerFactory $indexerFactory
-     * @param ManagerInterface $eventManager
-     * @param WebsiteFactory $websiteFactory
-     * @param StoreFactory $storeFactory
-     * @param GroupFactory $groupFactory
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        IndexerFactory $indexerFactory,
-        ManagerInterface $eventManager,
-        WebsiteFactory $websiteFactory,
-        StoreFactory $storeFactory,
-        GroupFactory $groupFactory,
-        LoggerInterface $log
+        private readonly IndexerFactory $indexer,
+        private readonly ManagerInterface $eventManager,
+        private readonly WebsiteFactory $websiteFactory,
+        private readonly StoreFactory $storeFactory,
+        private readonly GroupFactory $groupFactory,
+        private readonly LoggerInterface $log
     ) {
-        $this->indexer = $indexerFactory;
-        $this->eventManager = $eventManager;
-        $this->websiteFactory = $websiteFactory;
-        $this->storeFactory = $storeFactory;
-        $this->groupFactory = $groupFactory;
-        $this->log = $log;
     }
 
     public function execute(ComponentContext $context): ComponentResult
@@ -84,41 +46,49 @@ class Websites implements ComponentInterface
         $result = new ComponentResult();
         $data = $context->getData();
 
-        try {
-            if (!isset($data['websites'])) {
-                throw new ComponentException("No websites found.");
-            }
+        if (!isset($data['websites']) || !is_array($data['websites'])) {
+            $result->addError('No "websites" node found in the source data.');
+            return $result;
+        }
 
+        $dryRun = $context->isDryRun();
+
+        try {
             // Loop through the websites
             foreach ($data['websites'] as $code => $websiteData) {
                 // Process the website
-                $website = $this->processWebsite($code, $websiteData);
+                $website = $this->processWebsite($code, $websiteData, $dryRun, $result);
 
                 // Loop through the store groups
                 foreach ($websiteData['store_groups'] as $storeGroupData) {
                     // Process the store group
-                    $storeGroup = $this->processStoreGroup($storeGroupData, $website);
+                    $storeGroup = $this->processStoreGroup($storeGroupData, $website, $dryRun, $result);
 
                     // Loop through the store views
                     foreach ($storeGroupData['store_views'] as $code => $storeViewData) {
                         // Process the store view
-                        $this->processStoreView($code, $storeViewData, $storeGroup);
+                        $this->processStoreView($code, $storeViewData, $storeGroup, $dryRun, $result);
                     }
 
                     // As the store may not be created yet, associated the default store to the store group
                     // has to be completed after all stores for the store group have been created.
-                    $this->setDefaultStore($storeGroup, $storeGroupData);
+                    $this->setDefaultStore($storeGroup, $storeGroupData, $dryRun, $result);
                 }
             }
 
             if ($this->reindex === true) {
-                $this->log->logInfo('Running a reindex of the catalog_product_price table.');
-                $indexProcess = $this->indexer->create();
-                $indexProcess->load('catalog_product_price');
-                $indexProcess->reindexAll();
+                if ($dryRun) {
+                    $this->log->logInfo('[dry-run] Would run a reindex of the catalog_product_price table.');
+                } else {
+                    $this->log->logInfo('Running a reindex of the catalog_product_price table.');
+                    $indexProcess = $this->indexer->create();
+                    $indexProcess->load('catalog_product_price');
+                    $indexProcess->reindexAll();
+                }
             }
         } catch (\Exception $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
 
         return $result;
@@ -130,7 +100,7 @@ class Websites implements ComponentInterface
      * @return Website
      * @SuppressWarnings(PHPMD)
      */
-    protected function processWebsite($code, $websiteData)
+    protected function processWebsite($code, $websiteData, bool $dryRun, ComponentResult $result)
     {
         $logNest = 1;
 
@@ -141,6 +111,7 @@ class Websites implements ComponentInterface
             $website->load($code, 'code');
 
             $canSave = false;
+            $isNew = false;
 
             // Check if it exists
             if ($website->getId()) {
@@ -149,6 +120,7 @@ class Websites implements ComponentInterface
                 $this->reindex = true;
                 // If it does not exist, just set the existing data up with the website
                 $canSave = true;
+                $isNew = true;
                 $this->log->logComment(sprintf("Creating a new Website with code '%s'", $code), $logNest);
                 $website->setData($websiteData);
                 $website->setCode($code);
@@ -181,13 +153,21 @@ class Websites implements ComponentInterface
             }
 
             if ($canSave) {
-                // Save the website
-                $website->getResource()->save($website);
-                $this->log->logInfo(sprintf("Saved website '%s'", $code, $logNest));
+                if ($dryRun) {
+                    $this->log->logInfo(sprintf("[dry-run] Would save website '%s'", $code), $logNest);
+                } else {
+                    // Save the website
+                    $website->getResource()->save($website);
+                    $this->log->logInfo(sprintf("Saved website '%s'", $code), $logNest);
+                }
+                $isNew ? $result->recordCreated() : $result->recordUpdated();
+            } else {
+                $result->recordSkipped();
             }
             return $website;
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage(), $logNest);
+            $result->addError($e->getMessage());
         }
     }
 
@@ -197,7 +177,7 @@ class Websites implements ComponentInterface
      * @return Group
      * @SuppressWarnings(PHPMD)
      */
-    protected function processStoreGroup($storeGroupData, Website $website)
+    protected function processStoreGroup($storeGroupData, Website $website, bool $dryRun, ComponentResult $result)
     {
         $logNest = 2;
 
@@ -224,6 +204,7 @@ class Websites implements ComponentInterface
             }
 
             $canSave = false;
+            $isNew = false;
 
             // Check if the store group already exists
             if ($storeGroup->getId()) {
@@ -240,6 +221,7 @@ class Websites implements ComponentInterface
                 $storeGroup->setData($storeGroupData);
                 $storeGroup->setWebsite($website);
                 $canSave = true;
+                $isNew = true;
                 $this->reindex = true;
             }
 
@@ -265,14 +247,25 @@ class Websites implements ComponentInterface
             }
 
             if ($canSave) {
-                // Save the store group
-                $storeGroup->getResource()->save($storeGroup);
-                $this->log->logInfo(sprintf("Saved store group '%s'", $storeGroup->getName()), $logNest);
+                if ($dryRun) {
+                    $this->log->logInfo(
+                        sprintf("[dry-run] Would save store group '%s'", $storeGroup->getName()),
+                        $logNest
+                    );
+                } else {
+                    // Save the store group
+                    $storeGroup->getResource()->save($storeGroup);
+                    $this->log->logInfo(sprintf("Saved store group '%s'", $storeGroup->getName()), $logNest);
+                }
+                $isNew ? $result->recordCreated() : $result->recordUpdated();
+            } else {
+                $result->recordSkipped();
             }
 
             return $storeGroup;
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage(), $logNest);
+            $result->addError($e->getMessage());
         }
     }
 
@@ -283,7 +276,7 @@ class Websites implements ComponentInterface
      * @return Store
      * @SuppressWarnings(PHPMD)
      */
-    protected function processStoreView($code, $storeViewData, Group $storeGroup)
+    protected function processStoreView($code, $storeViewData, Group $storeGroup, bool $dryRun, ComponentResult $result)
     {
         $logNest = 3;
 
@@ -294,6 +287,7 @@ class Websites implements ComponentInterface
             $storeView->load($code, 'code');
 
             $canSave = false;
+            $isNew = false;
 
             // Check if it exists
             if ($storeView->getId()) {
@@ -301,6 +295,7 @@ class Websites implements ComponentInterface
             } else {
                 // If it does not exist, just set the existing data up with the store view
                 $canSave = true;
+                $isNew = true;
                 $this->reindex = true;
                 $this->log->logComment(sprintf("Creating a new Website with code '%s'", $code), $logNest);
                 $storeView->setData($storeViewData);
@@ -343,14 +338,22 @@ class Websites implements ComponentInterface
             }
 
             if ($canSave) {
-                // Save the store view
-                $storeView->getResource()->save($storeView);
-                $this->eventManager->dispatch('store_add', ['store' => $storeView]);
-                $this->log->logInfo(sprintf("Saved store view '%s'", $code), $logNest);
+                if ($dryRun) {
+                    $this->log->logInfo(sprintf("[dry-run] Would save store view '%s'", $code), $logNest);
+                } else {
+                    // Save the store view
+                    $storeView->getResource()->save($storeView);
+                    $this->eventManager->dispatch('store_add', ['store' => $storeView]);
+                    $this->log->logInfo(sprintf("Saved store view '%s'", $code), $logNest);
+                }
+                $isNew ? $result->recordCreated() : $result->recordUpdated();
+            } else {
+                $result->recordSkipped();
             }
             return $storeView;
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage(), $logNest);
+            $result->addError($e->getMessage());
         }
     }
 
@@ -359,7 +362,7 @@ class Websites implements ComponentInterface
      * @param $storeGroupData
      * @SuppressWarnings(PHPMD)
      */
-    protected function setDefaultStore(Group $storeGroup, $storeGroupData)
+    protected function setDefaultStore(Group $storeGroup, $storeGroupData, bool $dryRun, ComponentResult $result): void
     {
         $logNest = 2;
 
@@ -374,14 +377,14 @@ class Websites implements ComponentInterface
 
             if (!$storeView->getId()) {
                 throw new ComponentException(
-                    sprintf("Cannot find store view with code %s", $storeGroupData['default_store'])
+                    (string) __("Cannot find store view with code %1", $storeGroupData['default_store'])
                 );
             }
 
             if ($storeView->getStoreGroupId() != $storeGroup->getId()) {
                 throw new ComponentException(
-                    sprintf(
-                        "This store view code %s does not belong to %s",
+                    (string) __(
+                        "This store view code %1 does not belong to %2",
                         $storeGroupData['default_store'],
                         $storeGroup->getName()
                     )
@@ -396,34 +399,41 @@ class Websites implements ComponentInterface
                 );
             } else {
                 $storeGroup->setDefaultStoreId($storeView->getId());
-                $storeGroup->getResource()->save($storeGroup);
-                $this->log->logInfo(
-                    sprintf(
-                        "Set default store view '%s' for store group '%s",
-                        $storeView->getCode(),
-                        $storeGroup->getName()
-                    ),
-                    $logNest
-                );
+
+                if ($dryRun) {
+                    $this->log->logInfo(
+                        sprintf(
+                            "[dry-run] Would set default store view '%s' for store group '%s",
+                            $storeView->getCode(),
+                            $storeGroup->getName()
+                        ),
+                        $logNest
+                    );
+                } else {
+                    $storeGroup->getResource()->save($storeGroup);
+                    $this->log->logInfo(
+                        sprintf(
+                            "Set default store view '%s' for store group '%s",
+                            $storeView->getCode(),
+                            $storeGroup->getName()
+                        ),
+                        $logNest
+                    );
+                }
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage(), $logNest);
+            $result->addError($e->getMessage());
         }
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }
