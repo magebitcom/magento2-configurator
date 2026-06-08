@@ -34,14 +34,13 @@ untouched, but running against a disposable/dev store is still recommended.
 
 ## Verified
 
-Run on **Magento 2.4.7-p3** (2026-06-08): all 27 components execute; no
-modernization-introduced `TypeError`s; exit code is non-zero when component
-errors occur.
+Run on **Magento 2.4.7-p3** (2026-06-08): all 27 components execute with **no
+crashes** (harness PASS); no modernization-introduced `TypeError`s; exit code is
+non-zero when component errors occur.
 
-## Known issue
+## Notes
 
-- **Configurable products** (`Products` via `configurable.csv`) crash inside
-  `firegento/fastsimpleimport`'s `ArrayAdapter` ("Undefined array key 0") during
-  validation. This is a pre-existing dependency edge case (the configurable
-  handling predates the v2 work), not a modernization regression. Simple-product
-  import works. Tracked separately.
+- **Configurable products** require their associated simple products to already
+  exist. When none resolve, the configurable row is skipped (and logged) rather
+  than handed as an empty set to FastSimpleImport's validation adapter — this
+  fixes the earlier "Undefined array key 0" crash in `ArrayAdapter`.

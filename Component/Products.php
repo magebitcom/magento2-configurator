@@ -147,6 +147,15 @@ class Products implements ComponentInterface
                 )
             );
         }
+        if ($productsArray === []) {
+            // Nothing survived preparation (e.g. configurable products whose
+            // associated simple products don't exist yet). FastSimpleImport's
+            // validation adapter cannot iterate an empty set, so stop here.
+            $this->log->logInfo('No products to import after preparation; all rows were skipped.');
+            $result->recordSkipped(count($this->skippedProducts));
+            return $result;
+        }
+
         $this->attributeOption->saveOptions();
         $this->log->logInfo('Validating import...');
         $validatorImport = $this->importerFactory->create();
@@ -163,6 +172,11 @@ class Products implements ComponentInterface
             $this->log->logInfo(
                 sprintf('[dry-run] Would import %s product rows via FastSimpleImport.', count($validatedProducts))
             );
+            return $result;
+        }
+
+        if ($validatedProducts === []) {
+            $this->log->logInfo('No valid products remained after validation; nothing to import.');
             return $result;
         }
 

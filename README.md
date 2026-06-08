@@ -87,7 +87,7 @@ to its schema page.
 | Attributes | `attributes` | create/maintain, swatches |
 | Attribute Sets | `attribute_sets` | |
 | Categories | `categories` | create/maintain |
-| Products | `products` | FastSimpleImport; configurable import has a [known issue](Test/Conformance/README.md#known-issue) |
+| Products | `products` | FastSimpleImport (configurable products need their simple products to exist) |
 | Blocks | `blocks` | create/maintain, phtml templates, versioning |
 | Pages | `pages` | create/maintain, versioning |
 | API Integrations | `apiintegrations` | |
