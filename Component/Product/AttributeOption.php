@@ -1,5 +1,12 @@
 <?php
-namespace CtiDigital\Configurator\Component\Product;
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
+
+namespace Magebit\Configurator\Component\Product;
 
 use Magento\Catalog\Api\ProductAttributeRepositoryInterface;
 use Magento\Eav\Api\AttributeOptionManagementInterface;
@@ -8,7 +15,7 @@ use Magento\Eav\Api\Data\AttributeOptionLabelInterfaceFactory;
 use Magento\Eav\Api\Data\AttributeOptionInterface;
 use Magento\Eav\Api\Data\AttributeOptionInterfaceFactory;
 use Magento\Catalog\Model\Product;
-use CtiDigital\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\LoggerInterface;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)

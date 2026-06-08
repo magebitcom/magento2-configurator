@@ -1,9 +1,15 @@
 <?php
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
-namespace CtiDigital\Configurator\Console\Command;
+namespace Magebit\Configurator\Console\Command;
 
-use CtiDigital\Configurator\Api\ComponentListInterface;
-use CtiDigital\Configurator\Exception\ConfiguratorAdapterException;
+use Magebit\Configurator\Api\ComponentListInterface;
+use Magebit\Configurator\Exception\ConfiguratorAdapterException;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;

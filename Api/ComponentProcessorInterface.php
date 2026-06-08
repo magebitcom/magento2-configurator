@@ -1,11 +1,12 @@
 <?php
 /**
- * @package  CtiDigital\Configurator
- * @author Bartosz Herba <b.herba@ctidigital.com>
- * @copyright 2017 CtiDigital
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
-namespace CtiDigital\Configurator\Api;
+namespace Magebit\Configurator\Api;
 
 /**
  * Interface ComponentProcessorInterface

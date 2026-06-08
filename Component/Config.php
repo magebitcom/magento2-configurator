@@ -1,17 +1,26 @@
 <?php
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
-namespace CtiDigital\Configurator\Component;
+declare(strict_types=1);
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Api\VersionManagementInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
-use CtiDigital\Configurator\Model\Processor;
+namespace Magebit\Configurator\Component;
+
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\VersionManagementInterface;
+use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Processor;
 use Magento\Config\Model\Config\Backend\Encrypted;
 use Magento\Config\Model\ResourceModel\Config as ConfigResource;
 use Magento\Config\Model\ResourceModel\Config\Data\CollectionFactory as ConfigCollectionFactory;
 use Magento\Framework\App\Config as ScopeConfig;
-use Magento\Framework\App\Config\Initial;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Encryption\EncryptorInterface;
 use Magento\Framework\Exception\LocalizedException;
@@ -24,110 +33,51 @@ class Config implements ComponentInterface
     public const PATH_THEME_ID = 'design/theme/theme_id';
     public const ENCRYPTED_MODEL = Encrypted::class;
 
-    protected string $alias = 'config';
-    protected string $name = 'Configuration';
-    protected string $description = 'Component to set the store/system configuration values';
+    private const ALIAS = 'config';
+    private const DESCRIPTION = 'Component to set the store/system configuration values';
 
-    /**
-     * @var ConfigResource
-     */
-    protected ConfigResource $configResource;
-
-    /**
-     * @var ScopeConfig
-     */
-    protected ScopeConfig $scopeConfig;
-
-    /**
-     * @var CollectionFactory
-     */
-    protected CollectionFactory $collectionFactory;
-
-    /**
-     * @var EncryptorInterface
-     */
-    protected EncryptorInterface $encryptor;
-
-    /**
-     * @var WebsiteFactory
-     */
-    protected WebsiteFactory $websiteFactory;
-
-    /**
-     * @var StoreFactory
-     */
-    protected StoreFactory $storeFactory;
-
-    /**
-     * @var LoggerInterface
-     */
-    private LoggerInterface $log;
-
-    /**
-     * @var ScopeConfig\Initial
-     */
-    private ScopeConfig\Initial $initialConfig;
-
-    /**
-     * @var ConfigCollectionFactory
-     */
-    private ConfigCollectionFactory $configValueFactory;
-
-    /**
-     * Config constructor.
-     * @param ConfigResource $configResource
-     * @param ScopeConfig $scopeConfig
-     * @param Initial $initialConfig
-     * @param CollectionFactory $collectionFactory
-     * @param EncryptorInterface $encryptor
-     * @param WebsiteFactory $websiteFactory
-     * @param StoreFactory $storeFactory
-     * @param LoggerInterface $log
-     * @param VersionManagementInterface $versionManagement
-     * @param ConfigCollectionFactory $configValueFactory
-     */
     public function __construct(
-        ConfigResource $configResource,
-        ScopeConfig $scopeConfig,
-        ScopeConfig\Initial $initialConfig,
-        CollectionFactory $collectionFactory,
-        EncryptorInterface $encryptor,
-        WebsiteFactory $websiteFactory,
-        StoreFactory $storeFactory,
-        LoggerInterface $log,
+        protected readonly ConfigResource $configResource,
+        protected readonly ScopeConfig $scopeConfig,
+        protected readonly ScopeConfig\Initial $initialConfig,
+        protected readonly CollectionFactory $collectionFactory,
+        protected readonly EncryptorInterface $encryptor,
+        protected readonly WebsiteFactory $websiteFactory,
+        protected readonly StoreFactory $storeFactory,
+        private readonly LoggerInterface $log,
         private readonly VersionManagementInterface $versionManagement,
-        ConfigCollectionFactory $configValueFactory
+        private readonly ConfigCollectionFactory $configValueFactory
     ) {
-        $this->configValueFactory = $configValueFactory;
-        $this->configResource = $configResource;
-        $this->scopeConfig = $scopeConfig;
-        $this->initialConfig = $initialConfig;
-        $this->collectionFactory = $collectionFactory;
-        $this->encryptor = $encryptor;
-        $this->websiteFactory = $websiteFactory;
-        $this->storeFactory = $storeFactory;
-        $this->log = $log;
     }
 
     /**
-     * @param null $data
-     * @param string $mode
      * @SuppressWarnings(PHPMD)
      * @throws LocalizedException
      */
-    public function execute($data = null, string $mode = Processor::MODE_MAINTAIN): void //phpcs:ignore Generic.Metrics.NestingLevel
+    public function execute(ComponentContext $context): ComponentResult //phpcs:ignore Generic.Metrics.NestingLevel
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+        $mode = $context->getMode()->value;
+        $dryRun = $context->isDryRun();
+
+        if ($data === [] || !is_array($data)) {
+            $result->addError('No configuration found in the source data.');
+            return $result;
+        }
+
         try {
             $validScopes = ['global', 'websites', 'stores'];
             foreach ($data as $scope => $configurations) {
                 if (!in_array($scope, $validScopes)) {
-                    throw new ComponentException(sprintf("This is not a valid scope '%s' in your config.", $scope));
+                    throw new ComponentException(
+                        (string) __("This is not a valid scope '%1' in your config.", $scope)
+                    );
                 }
 
                 if ($scope == "global") {
                     foreach ($configurations as $configuration) {
                         // Handle encryption parameter
-
                         $encryption = 0;
                         if (isset($configuration['encryption']) && $configuration['encryption'] == 1) {
                             $encryption = 1;
@@ -141,7 +91,9 @@ class Config implements ComponentInterface
                             $convertedConfiguration['value'],
                             $encryption,
                             $mode,
-                            $convertedConfiguration['version'] ?? null
+                            $convertedConfiguration['version'] ?? null,
+                            $dryRun,
+                            $result
                         );
                     }
                 }
@@ -160,10 +112,12 @@ class Config implements ComponentInterface
                             $this->setWebsiteConfig(
                                 $convertedConfiguration['path'],
                                 $convertedConfiguration['value'],
-                                $code,
+                                (string) $code,
                                 $encryption,
                                 $mode,
-                                $convertedConfiguration['version'] ?? null
+                                $convertedConfiguration['version'] ?? null,
+                                $dryRun,
+                                $result
                             );
                         }
                     }
@@ -184,10 +138,12 @@ class Config implements ComponentInterface
                             $this->setStoreConfig(
                                 $convertedConfiguration['path'],
                                 $convertedConfiguration['value'],
-                                $code,
+                                (string) $code,
                                 $encryption,
                                 $mode,
-                                $convertedConfiguration['version'] ?? null
+                                $convertedConfiguration['version'] ?? null,
+                                $dryRun,
+                                $result
                             );
                         }
                     }
@@ -195,14 +151,12 @@ class Config implements ComponentInterface
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
+
+        return $result;
     }
 
-    /**
-     * @param array $configuration
-     * @param int $encryption
-     * @return int
-     */
     private function determineEncryption(array $configuration, int $encryption): int
     {
         $metaData = $this->initialConfig->getMetadata();
@@ -219,26 +173,22 @@ class Config implements ComponentInterface
     }
 
     /**
-     * Set global store config
-     *
-     * @param string $path
-     * @param string|null $value
-     * @param int $encrypted
-     * @param string $mode
-     * @return void
+     * Set global store config.
      */
     private function setGlobalConfig(
         string $path,
-        ?string $value = null,
+        mixed $value = null,
         int $encrypted = 0,
         string $mode = Processor::MODE_MAINTAIN,
-        ?string $version = null
+        ?string $version = null,
+        bool $dryRun = false,
+        ?ComponentResult $result = null
     ): void {
         try {
             // Check existing value, skip if the same
             $scope = ScopeConfigInterface::SCOPE_TYPE_DEFAULT;
             $existingValue = $this->getSetConfigValue($path, $scope, 0);
-            $versionId = $this->alias . '_global_' . $path;
+            $versionId = self::ALIAS . '_global_' . $path;
 
             $isNewVersion = isset($version) && $this->versionManagement->isNewVersion($versionId, (int) $version);
 
@@ -246,11 +196,18 @@ class Config implements ComponentInterface
                 ($existingValue && $mode == Processor::MODE_CREATE && !$isNewVersion)
             ) {
                 $this->log->logComment(sprintf("Global Config Already Has Value: %s = %s", $path, $existingValue));
+                $result?->recordSkipped();
                 return;
             }
 
             if ($encrypted) {
                 $value = $this->encrypt($value);
+            }
+
+            if ($dryRun) {
+                $this->log->logInfo(sprintf("[dry-run] Would set Global Config: %s = %s", $path, $value));
+                $result?->recordCreated();
+                return;
             }
 
             // Save the config
@@ -259,28 +216,25 @@ class Config implements ComponentInterface
             if ($version) {
                 $this->versionManagement->setVersion($versionId, (int) $version);
             }
+            $result?->recordCreated();
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result?->addError($e->getMessage());
         }
     }
 
     /**
-     * Set config for website
-     *
-     * @param string $path
-     * @param string|null $value
-     * @param string $code
-     * @param int $encrypted
-     * @param string $mode
-     * @return void
+     * Set config for website.
      */
     private function setWebsiteConfig(
         string $path,
-        ?string $value,
+        mixed $value,
         string $code,
         int $encrypted = 0,
         string $mode = Processor::MODE_MAINTAIN,
-        ?string $version = null
+        ?string $version = null,
+        bool $dryRun = false,
+        ?ComponentResult $result = null
     ): void {
         try {
             $logNest = 1;
@@ -290,18 +244,24 @@ class Config implements ComponentInterface
             $website = $this->websiteFactory->create();
             $website->load($code, 'code');
             if (!$website->getId()) {
-                throw new ComponentException(sprintf("There is no website with the code '%s'", $code));
+                throw new ComponentException(
+                    (string) __("There is no website with the code '%1'", $code)
+                );
             }
 
             // Check existing value, skip if the same
-            $existingValue = $this->getSetConfigValue($path, $scope, $website->getId());
-            $versionId = $this->alias . '_website_' . $website->getId() . '_' . $path;
+            $existingValue = $this->getSetConfigValue($path, $scope, (int) $website->getId());
+            $versionId = self::ALIAS . '_website_' . $website->getId() . '_' . $path;
             $isNewVersion = isset($version) && $this->versionManagement->isNewVersion($versionId, (int) $version);
 
             if (($existingValue !== false && $value == $existingValue) ||
                 ($existingValue && $mode == Processor::MODE_CREATE && !$isNewVersion)
             ) {
-                $this->log->logComment(sprintf("Website '%s' Config Already: %s = %s", $code, $path, $existingValue), $logNest);
+                $this->log->logComment(
+                    sprintf("Website '%s' Config Already: %s = %s", $code, $path, $existingValue),
+                    $logNest
+                );
+                $result?->recordSkipped();
                 return;
             }
 
@@ -309,23 +269,30 @@ class Config implements ComponentInterface
                 $value = $this->encrypt($value);
             }
 
+            if ($dryRun) {
+                $this->log->logInfo(
+                    sprintf("[dry-run] Would set Website '%s' Config: %s = %s", $code, $path, $value),
+                    $logNest
+                );
+                $result?->recordCreated();
+                return;
+            }
+
             // Save the config
-            $this->configResource->saveConfig($path, $value, $scope, $website->getId());
+            $this->configResource->saveConfig($path, $value, $scope, (int) $website->getId());
             $this->log->logInfo(sprintf("Website '%s' Config: %s = %s", $code, $path, $value), $logNest);
             if ($version) {
                 $this->versionManagement->setVersion($versionId, (int) $version);
             }
+            $result?->recordCreated();
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result?->addError($e->getMessage());
         }
     }
 
     /**
-     * Convert paths or values before they're processed
-     *
-     * @param array $configuration
-     *
-     * @return array
+     * Convert paths or values before they're processed.
      */
     protected function convert(array $configuration): array
     {
@@ -339,23 +306,19 @@ class Config implements ComponentInterface
     }
 
     /**
-     * Set config for store view
+     * Set config for store view.
      *
-     * @param string $path
-     * @param string|null $value
-     * @param string $code
-     * @param int $encrypted
-     * @param string $mode
-     * @return void
      * @throws LocalizedException
      */
     private function setStoreConfig(
         string $path,
-        ?string $value,
+        mixed $value,
         string $code,
         int $encrypted = 0,
         string $mode = Processor::MODE_MAINTAIN,
-        ?string $version = null
+        ?string $version = null,
+        bool $dryRun = false,
+        ?ComponentResult $result = null
     ): void {
         try {
             $logNest = 2;
@@ -364,17 +327,23 @@ class Config implements ComponentInterface
             $storeView = $this->storeFactory->create();
             $storeView->load($code, 'code');
             if (!$storeView->getId()) {
-                throw new ComponentException(sprintf("There is no store view with the code '%s'", $code));
+                throw new ComponentException(
+                    (string) __("There is no store view with the code '%1'", $code)
+                );
             }
 
             // Check existing value, skip if the same
-            $existingValue = $this->getSetConfigValue($path, $scope, $storeView->getId());
-            $versionId = $this->alias . '_store_' . $storeView->getId() . '_' . $path;
+            $existingValue = $this->getSetConfigValue($path, $scope, (int) $storeView->getId());
+            $versionId = self::ALIAS . '_store_' . $storeView->getId() . '_' . $path;
             $isNewVersion = isset($version) && $this->versionManagement->isNewVersion($versionId, (int) $version);
 
             if (($existingValue !== false && $value == $existingValue) ||
                 ($existingValue && $mode == Processor::MODE_CREATE && !$isNewVersion)) {
-                $this->log->logComment(sprintf("Store '%s' Config Already: %s = %s", $code, $path, $existingValue), $logNest);
+                $this->log->logComment(
+                    sprintf("Store '%s' Config Already: %s = %s", $code, $path, $existingValue),
+                    $logNest
+                );
+                $result?->recordSkipped();
                 return;
             }
 
@@ -382,23 +351,32 @@ class Config implements ComponentInterface
                 $value = $this->encrypt($value);
             }
 
-            $this->configResource->saveConfig($path, $value, $scope, $storeView->getId());
+            if ($dryRun) {
+                $this->log->logInfo(
+                    sprintf("[dry-run] Would set Store '%s' Config: %s = %s", $code, $path, $value),
+                    $logNest
+                );
+                $result?->recordCreated();
+                return;
+            }
+
+            $this->configResource->saveConfig($path, $value, $scope, (int) $storeView->getId());
             $this->log->logInfo(sprintf("Store '%s' Config: %s = %s", $code, $path, $value), $logNest);
             if ($version) {
                 $this->versionManagement->setVersion($versionId, (int) $version);
             }
+            $result?->recordCreated();
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result?->addError($e->getMessage());
         }
     }
 
     /**
-     * Checks if the config path is setting the theme by its path so we can get the ID
+     * Checks if the config path is setting the theme by its path so we can get the ID.
      *
-     * @param $path
-     * @param $value
-     *
-     * @return bool
+     * @param mixed $path
+     * @param mixed $value
      */
     public function isConfigTheme($path, $value): bool
     {
@@ -409,25 +387,20 @@ class Config implements ComponentInterface
     }
 
     /**
-     * Get the theme ID by the path
+     * Get the theme ID by the path.
      *
-     * @param $themePath
-     *
-     * @return int
+     * @param mixed $themePath
      */
     public function getThemeIdByPath($themePath): int
     {
         $themeCollection = $this->collectionFactory->create();
         $theme = $themeCollection->getThemeByFullPath($themePath);
-        return $theme->getThemeId();
+        return (int) $theme->getThemeId();
     }
 
     /**
-     * Get Already set value in DB for the config
+     * Get already set value in DB for the config.
      *
-     * @param string $path
-     * @param string $scope
-     * @param int $scopeId
      * @return string|false|null
      */
     private function getSetConfigValue(string $path, string $scope, int $scopeId): string|false|null
@@ -446,27 +419,20 @@ class Config implements ComponentInterface
     }
 
     /**
-     * @param $value
-     * @return string
+     * @param mixed $value
      */
     private function encrypt($value): string
     {
         return $this->encryptor->encrypt($value);
     }
 
-    /**
-     * @return string
-     */
     public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
     public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

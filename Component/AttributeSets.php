@@ -1,79 +1,78 @@
 <?php
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
-namespace CtiDigital\Configurator\Component;
+declare(strict_types=1);
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
-use CtiDigital\Configurator\Api\LoggerInterface;
+namespace Magebit\Configurator\Component;
+
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Eav\Api\AttributeSetRepositoryInterface;
 use Magento\Catalog\Model\Product;
 use Magento\Eav\Api\Data\AttributeSetInterface;
 use Magento\Eav\Setup\EavSetup;
-use Magento\Eav\Model\AttributeSetRepository;
 
 /**
  * @SuppressWarnings(PHPMD.LongVariable)
  */
 class AttributeSets implements ComponentInterface
 {
-    protected $alias = 'attribute_sets';
-    protected $name = 'Attribute Sets';
-    protected $description = 'Component to create/maintain attribute sets.';
+    private const ALIAS = 'attribute_sets';
+    private const DESCRIPTION = 'Component to create/maintain attribute sets.';
 
-    /**
-     * @var EavSetup
-     */
-    protected $eavSetup;
-
-    /**
-     * @var AttributeSetRepository
-     */
-    protected $attributeSetRepository;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * AttributeSets constructor.
-     * @param LoggerInterface $log
-     * @param ObjectManagerInterface $objectManager
-     * @param EavSetup $eavSetup
-     * @param AttributeSetRepositoryInterface $attributeSetRepository
-     */
     public function __construct(
-        EavSetup $eavSetup,
-        AttributeSetRepositoryInterface $attributeSetRepository,
-        LoggerInterface $log
+        private readonly EavSetup $eavSetup,
+        private readonly AttributeSetRepositoryInterface $attributeSetRepository,
+        private readonly LoggerInterface $log
     ) {
-        $this->eavSetup = $eavSetup;
-        $this->attributeSetRepository = $attributeSetRepository;
-        $this->log = $log;
     }
 
-    /**
-     * @param array $attributeConfigurationData
-     */
-    public function execute($attributeConfigurationData = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $attributeConfigurationData = $context->getData();
+
+        if (!isset($attributeConfigurationData['attribute_sets'])
+            || !is_array($attributeConfigurationData['attribute_sets'])
+        ) {
+            $result->addError('No "attribute_sets" node found in the source data.');
+            return $result;
+        }
+
         try {
             foreach ($attributeConfigurationData['attribute_sets'] as $attributeSetConfiguration) {
-                $this->processAttributeSet($attributeSetConfiguration);
+                $this->processAttributeSet($attributeSetConfiguration, $context->isDryRun(), $result);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
+
+        return $result;
     }
 
-    /**
-     * @param array $attributeSetConfig
-     */
-    protected function processAttributeSet(array $attributeSetConfig)
+    protected function processAttributeSet(array $attributeSetConfig, bool $dryRun, ComponentResult $result): void
     {
+        if ($dryRun) {
+            $this->log->logInfo(
+                sprintf('[dry-run] Would create attribute set: "%s"', $attributeSetConfig['name'])
+            );
+            $result->recordCreated();
+            return;
+        }
+
         $this->eavSetup->addAttributeSet(Product::ENTITY, $attributeSetConfig['name']);
 
         $this->log->logInfo(sprintf('Creating attribute set: "%s"', $attributeSetConfig['name']));
+        $result->recordCreated();
 
         $attributeSetId = $this->eavSetup->getAttributeSetId(Product::ENTITY, $attributeSetConfig['name']);
         $attributeSetEntity = $this->attributeSetRepository->get($attributeSetId);
@@ -87,11 +86,7 @@ class AttributeSets implements ComponentInterface
         }
     }
 
-    /**
-     * @param AttributeSetInterface $attributeSetEntity
-     * @param array $attributeGroupData
-     */
-    protected function addAttributeGroups(AttributeSetInterface $attributeSetEntity, array $attributeGroupData)
+    protected function addAttributeGroups(AttributeSetInterface $attributeSetEntity, array $attributeGroupData): void
     {
         $attributeSetName = $attributeSetEntity->getAttributeSetName();
 
@@ -138,19 +133,15 @@ class AttributeSets implements ComponentInterface
         }
     }
 
-    /**
-     * @param AttributeSetInterface $attributeSetEntity
-     * @param array $group
-     */
     protected function addAttributeGroupAssociations(
         AttributeSetInterface $attributeSetEntity,
         array $group
-    ) {
+    ): void {
         foreach ($group['attributes'] as $attributeCode) {
             $attributeData = $this->eavSetup->getAttribute(Product::ENTITY, $attributeCode);
 
             if (count($attributeData) === 0) {
-                throw new ComponentException("Attribute '{$attributeCode}' does not exist.");
+                throw new ComponentException((string) __("Attribute '%1' does not exist.", $attributeCode));
             }
 
             $this->eavSetup->addAttributeToGroup(
@@ -164,33 +155,23 @@ class AttributeSets implements ComponentInterface
         }
     }
 
-    /**
-     * @param $attributeSetName
-     * @return string
-     */
-    protected function getAttributeSetId($attributeSetName)
+    protected function getAttributeSetId($attributeSetName): string
     {
         $attributeSetData = $this->eavSetup->getAttributeSet(Product::ENTITY, $attributeSetName);
         if (array_key_exists('attribute_set_id', $attributeSetData)) {
             return $attributeSetData['attribute_set_id'];
         }
 
-        throw new ComponentException('Could not find attribute set name.');
+        throw new ComponentException((string) __('Could not find attribute set name.'));
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

@@ -1,51 +1,52 @@
 <?php
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
-namespace CtiDigital\Configurator\Component;
+declare(strict_types=1);
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
-use Magento\Framework\Exception\LocalizedException;
+namespace Magebit\Configurator\Component;
+
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\TaxImportExport\Model\Rate\CsvImportHandler;
 
 class TaxRates implements ComponentInterface
 {
-    protected $alias = 'taxrates';
-    protected $name = 'Tax Rates';
-    protected $description = 'Component to create Tax Rates';
+    private const ALIAS = 'taxrates';
+    private const DESCRIPTION = 'Component to create Tax Rates';
 
-    /**
-     * @var CsvImportHandler
-     */
-    protected $csvImportHandler;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * TaxRates constructor.
-     * @param CsvImportHandler $csvImportHandler
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        CsvImportHandler $csvImportHandler,
-        LoggerInterface $log
+        private readonly CsvImportHandler $csvImportHandler,
+        private readonly LoggerInterface $log
     ) {
-        $this->csvImportHandler = $csvImportHandler;
-        $this->log = $log;
     }
 
-    /**
-     * @param null $data
-     * @throws LocalizedException
-     */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
+        if (!isset($data[0])) {
+            $result->addError('No row data found.');
+            return $result;
+        }
+
         try {
             // Sort data into the column order importExport requires
             $sortedData = $this->getSortedData($data);
+
+            if ($context->isDryRun()) {
+                // Bulk CSV import: skip both the temp-file write and the import.
+                $this->log->logInfo('[dry-run] Would import tax rates from a generated CSV file.');
+                return $result;
+            }
 
             // Generate sorted csv file
             $tmpFile = $this->getTmpFile($sortedData);
@@ -62,7 +63,10 @@ class TaxRates implements ComponentInterface
             $this->log->logInfo('Tax rates finished importing, check the rates in the admin panel.');
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
+
+        return $result;
     }
 
     /**
@@ -124,19 +128,13 @@ class TaxRates implements ComponentInterface
         return $tmpFile;
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

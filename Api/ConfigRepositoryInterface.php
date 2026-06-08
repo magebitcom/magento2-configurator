@@ -1,10 +1,16 @@
 <?php
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
 declare(strict_types=1);
 
-namespace CtiDigital\Configurator\Api;
+namespace Magebit\Configurator\Api;
 
-use CtiDigital\Configurator\Api\Data\ConfigInterface;
+use Magebit\Configurator\Api\Data\ConfigInterface;
 
 interface ConfigRepositoryInterface
 {

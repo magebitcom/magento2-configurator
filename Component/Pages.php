@@ -1,13 +1,23 @@
 <?php
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
-namespace CtiDigital\Configurator\Component;
+declare(strict_types=1);
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Api\VersionManagementInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
+namespace Magebit\Configurator\Component;
+
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\VersionManagementInterface;
+use Magebit\Configurator\Exception\ComponentException;
 use Exception;
-use CtiDigital\Configurator\Model\Processor;
+use Magebit\Configurator\Model\Processor;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Cms\Api\Data\PageInterface;
 use Magento\Cms\Api\Data\PageInterfaceFactory;
 use Magento\Cms\Api\PageRepositoryInterface;
@@ -22,30 +32,18 @@ use Symfony\Component\Filesystem\Filesystem;
 use Magento\Framework\EntityManager\MetadataPool;
 
 /**
- * @see \CtiDigital\Configurator\Component\Pages
+ * @see \Magebit\Configurator\Component\Pages
  */
 class Pages implements ComponentInterface
 {
-    protected string $alias = 'pages';
-    protected string $name = 'Pages';
-    protected string $description = 'Component to create/maintain pages.';
+    private const ALIAS = 'pages';
+    private const DESCRIPTION = 'Component to create/maintain pages.';
+
     protected array $requiredFields = ['title'];
     protected array $defaultValues = ['page_layout' => 'empty', 'is_active' => '1'];
 
     protected $viewModelRegistry = null;
 
-    /**
-     * @param PageRepositoryInterface $pageRepository
-     * @param PageInterfaceFactory $pageFactory
-     * @param StoreRepositoryInterface $storeRepository
-     * @param LoggerInterface $log
-     * @param Filesystem $filesystem
-     * @param Escaper $escaper
-     * @param VersionManagementInterface $versionManagement
-     * @param ObjectManagerInterface $objectManager
-     * @param ResourceConnection $resourceConnection
-     * @param MetadataPool $metadataPool
-     */
     public function __construct(
         private readonly PageRepositoryInterface    $pageRepository,
         private readonly PageInterfaceFactory       $pageFactory,
@@ -66,20 +64,29 @@ class Pages implements ComponentInterface
     /**
      * Loop through the data array and process page data
      *
-     * @param null $data
-     * @param string $mode
-     * @return void
      * @throws LocalizedException
      */
-    public function execute($data = null, string $mode = Processor::MODE_MAINTAIN): void
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+        $mode = $context->getMode()->value;
+
+        if (!is_array($data)) {
+            $result->addError('No page data found in the source data.');
+            return $result;
+        }
+
         try {
-            foreach ($data as $identifier => $data) {
-                $this->processPage($identifier, $data, $mode);
+            foreach ($data as $identifier => $pageData) {
+                $this->processPage((string) $identifier, $pageData, $mode, $context->isDryRun(), $result);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
+
+        return $result;
     }
 
     /**
@@ -88,25 +95,32 @@ class Pages implements ComponentInterface
      * @param string $identifier
      * @param array $data
      * @param string $mode
+     * @param bool $dryRun
+     * @param ComponentResult $result
      * @return void
      * @throws LocalizedException
      * @SuppressWarnings(PHPMD)
      */
-    protected function processPage(string $identifier, array $data, string $mode): void
-    {
+    protected function processPage(
+        string $identifier,
+        array $data,
+        string $mode,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
         try {
             foreach ($data['page'] as $pageData) {
                 if (isset($pageData['stores'])) {
                     foreach ($pageData['stores'] as $storeCode) {
                         $store = $this->storeRepository->get($storeCode);
-                        $pageId = $this->getPageIdByIdentifier($identifier, $store->getId());
+                        $pageId = $this->getPageIdByIdentifier($identifier, (int) $store->getId());
                     }
                 } else {
                     $pageId = $this->getPageIdByIdentifier($identifier, 0);
                 }
 
                 $version = $pageData['version'] ?? null;
-                $versionId = $this->alias . '_' . $identifier;
+                $versionId = self::ALIAS . '_' . $identifier;
 
                 if (isset($pageData['stores'])) {
                     $versionId .= implode('_', $pageData['stores']);
@@ -119,13 +133,16 @@ class Pages implements ComponentInterface
                 /** @var PageInterface $page */
                 if ($pageId) {
                     $isNewVersion = $version && $this->versionManagement->isNewVersion($versionId, (int) $version);
-                    if ($mode === 'create' && !$isNewVersion) {
+                    if ($mode === Processor::MODE_CREATE && !$isNewVersion) {
+                        $result->recordSkipped();
                         continue;
                     }
                     $page = $this->pageRepository->getById($pageId);
+                    $isNew = false;
                 } else {
                     $page = $this->pageFactory->create();
                     $page->setIdentifier($identifier);
+                    $isNew = true;
                 }
 
                 $this->checkRequiredFields($pageData);
@@ -205,16 +222,33 @@ class Pages implements ComponentInterface
 
                 //we only need to save if the model has changed
                 if ($page->hasDataChanges()) {
-                    $this->pageRepository->save($page);
-                    $this->log->logInfo(sprintf(
-                        "Save page %s",
-                        $identifier . ' (' . $page->getId() . ')'
-                    ));
+                    if ($dryRun) {
+                        $this->log->logInfo(sprintf(
+                            "[dry-run] Would %s page %s",
+                            $isNew ? 'create' : 'save',
+                            $identifier
+                        ));
+                    } else {
+                        $this->pageRepository->save($page);
+                        $this->log->logInfo(sprintf(
+                            "Save page %s",
+                            $identifier . ' (' . $page->getId() . ')'
+                        ));
+                    }
 
+                    $isNew ? $result->recordCreated() : $result->recordUpdated();
                 }
 
                 if ($version) {
-                    $this->versionManagement->setVersion($versionId, (int) $version);
+                    if ($dryRun) {
+                        $this->log->logInfo(sprintf(
+                            "[dry-run] Would set version %d for %s",
+                            (int) $version,
+                            $versionId
+                        ));
+                    } else {
+                        $this->versionManagement->setVersion($versionId, (int) $version);
+                    }
                 }
             }
         } catch (NoSuchEntityException $e) {
@@ -275,7 +309,7 @@ class Pages implements ComponentInterface
     {
         foreach ($this->requiredFields as $key) {
             if (!array_key_exists($key, $pageData)) {
-                throw new ComponentException('Required Data Missing ' . $key);
+                throw new ComponentException((string) __('Required Data Missing %1', $key));
             }
         }
     }
@@ -293,19 +327,13 @@ class Pages implements ComponentInterface
         }
     }
 
-    /**
-     * @return string
-     */
     public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
     public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

@@ -1,9 +1,19 @@
 <?php
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
-namespace CtiDigital\Configurator\Component;
+declare(strict_types=1);
 
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
+namespace Magebit\Configurator\Component;
+
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Customer\Model\Customer;
 use Magento\Eav\Setup\EavSetup;
 use Magento\Framework\Exception\LocalizedException;
@@ -11,18 +21,19 @@ use Magento\Eav\Model\AttributeRepository;
 use Magento\Customer\Setup\CustomerSetupFactory;
 use Magento\Customer\Setup\CustomerSetup;
 use Magento\Customer\Model\ResourceModel\Attribute;
+use Magento\Eav\Model\Config as EavConfig;
+use Magento\Eav\Model\ResourceModel\Entity\Attribute\Option\CollectionFactory as AttrOptionCollectionFactory;
 
 /**
  * @SuppressWarnings(PHPMD.LongVariable)
  */
 class CustomerAttributes extends Attributes
 {
-    const DEFAULT_ATTRIBUTE_SET_ID = 1;
-    const DEFAULT_ATTRIBUTE_GROUP_ID = 1;
+    public const DEFAULT_ATTRIBUTE_SET_ID = 1;
+    public const DEFAULT_ATTRIBUTE_GROUP_ID = 1;
 
-    protected $alias = 'customer_attributes';
-    protected $name = 'Customer Attributes';
-    protected $description = 'Component to create/maintain customer attributes.';
+    private const ALIAS = 'customer_attributes';
+    private const DESCRIPTION = 'Component to create/maintain customer attributes.';
 
     /**
      * @var string
@@ -36,21 +47,6 @@ class CustomerAttributes extends Attributes
     ];
 
     /**
-     * @var CustomerSetupFactory
-     */
-    protected $customerSetup;
-
-    /**
-     * @var Attribute
-     */
-    protected $attributeResource;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
      * @var array
      */
     protected $defaultForms = [
@@ -62,51 +58,50 @@ class CustomerAttributes extends Attributes
         ]
     ];
 
-    /**
-     * CustomerAttributes constructor.
-     * @param EavSetup $eavSetup
-     * @param AttributeRepository $attributeRepository
-     * @param CustomerSetupFactory $customerSetupFactory
-     * @param Attribute $attributeResource
-     * @param LoggerInterface $log
-     */
     public function __construct(
         EavSetup $eavSetup,
         AttributeRepository $attributeRepository,
-        CustomerSetupFactory $customerSetupFactory,
-        Attribute $attributeResource,
-        LoggerInterface $log
+        private readonly CustomerSetupFactory $customerSetup,
+        private readonly Attribute $attributeResource,
+        LoggerInterface $log,
+        AttrOptionCollectionFactory $attrOptionCollectionFactory,
+        EavConfig $eavConfig
     ) {
-        parent::__construct($eavSetup, $attributeRepository, $log);
+        parent::__construct($eavSetup, $attributeRepository, $log, $attrOptionCollectionFactory, $eavConfig);
         $this->attributeConfigMap = array_merge($this->attributeConfigMap, $this->customerConfigMap);
-        $this->customerSetup = $customerSetupFactory;
-        $this->attributeResource = $attributeResource;
-        $this->log = $log;
     }
 
-    /**
-     * @param array $attributeConfigurationData
-     */
-    public function execute($attributeConfigurationData = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
+        if (!isset($data['customer_attributes']) || !is_array($data['customer_attributes'])) {
+            $result->addError('No "customer_attributes" node found in the source data.');
+            return $result;
+        }
+
         try {
-            foreach ($attributeConfigurationData['customer_attributes'] as $attributeCode => $attributeConfiguration) {
-                $this->processAttribute($attributeCode, $attributeConfiguration);
-                $this->addAdditionalValues($attributeCode, $attributeConfiguration);
+            foreach ($data['customer_attributes'] as $attributeCode => $attributeConfiguration) {
+                $this->processAttribute($attributeCode, $attributeConfiguration, $context->isDryRun(), $result);
+                $this->addAdditionalValues($attributeCode, $attributeConfiguration, $context->isDryRun());
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
+
+        return $result;
     }
 
     /**
      * Adds necessary additional values to the attribute. Without these, values can't be saved
      * to the attribute and it won't appear in any forms.
      *
-     * @param $attributeCode
-     * @param $attributeConfiguration
+     * @param string $attributeCode
+     * @param array $attributeConfiguration
      */
-    protected function addAdditionalValues($attributeCode, $attributeConfiguration)
+    protected function addAdditionalValues($attributeCode, $attributeConfiguration, bool $dryRun): void
     {
         if ($this->attributeExists) {
             return;
@@ -114,6 +109,11 @@ class CustomerAttributes extends Attributes
         if (!isset($attributeConfiguration['used_in_forms']) ||
             !isset($attributeConfiguration['used_in_forms']['values'])) {
             $attributeConfiguration['used_in_forms'] = $this->defaultForms;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would apply additional values to %s.', $attributeCode));
+            return;
         }
 
         /** @var CustomerSetup $customerSetup */
@@ -142,19 +142,13 @@ class CustomerAttributes extends Attributes
         }
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

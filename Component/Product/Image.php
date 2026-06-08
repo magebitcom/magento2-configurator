@@ -1,7 +1,14 @@
 <?php
-namespace CtiDigital\Configurator\Component\Product;
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
-use CtiDigital\Configurator\Api\LoggerInterface;
+namespace Magebit\Configurator\Component\Product;
+
+use Magebit\Configurator\Api\LoggerInterface;
 use Magento\Framework\Filesystem;
 use Magento\Framework\App\Filesystem\DirectoryList;
 use FireGento\FastSimpleImport\Model\Config;

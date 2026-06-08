@@ -1,14 +1,20 @@
 <?php
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
 declare(strict_types=1);
 
-namespace CtiDigital\Configurator\Model;
+namespace Magebit\Configurator\Model;
 
-use CtiDigital\Configurator\Api\ConfigRepositoryInterface;
-use CtiDigital\Configurator\Api\Data\ConfigInterface;
-use CtiDigital\Configurator\Model\ResourceModel\Config\ConfigCollection;
-use CtiDigital\Configurator\Model\ResourceModel\Config\ConfigCollectionFactory;
-use CtiDigital\Configurator\Model\ResourceModel\ConfigResource;
+use Magebit\Configurator\Api\ConfigRepositoryInterface;
+use Magebit\Configurator\Api\Data\ConfigInterface;
+use Magebit\Configurator\Model\ResourceModel\Config\ConfigCollection;
+use Magebit\Configurator\Model\ResourceModel\Config\ConfigCollectionFactory;
+use Magebit\Configurator\Model\ResourceModel\ConfigResource;
 use Magento\Framework\Api\SearchCriteria\CollectionProcessor;
 use Magento\Framework\Api\SearchCriteriaBuilder;
 use Magento\Framework\Api\SearchCriteriaInterface;

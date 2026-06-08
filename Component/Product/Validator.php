@@ -1,8 +1,14 @@
 <?php
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
-namespace CtiDigital\Configurator\Component\Product;
+namespace Magebit\Configurator\Component\Product;
 
-use CtiDigital\Configurator\Component\Products;
+use Magebit\Configurator\Component\Products;
 use Firegento\FastSimpleImport\Model\Importer;
 use FireGento\FastSimpleImport\Model\Adapters\ImportAdapterFactoryInterface;
 
@@ -125,7 +131,9 @@ class Validator
     {
         $failedRows = [];
         // Creates a validation model and runs the import data through so we can find which rows would fail
-        $validation = $import->createImportModel();
+        // FastSimpleImport >=2.x exposes the import model via getImportModel()
+        // (the older createImportModel() was removed).
+        $validation = $import->getImportModel();
         $validationSource = $this->importAdapterFactory->create([
             'data' => $importLines,
             'multipleValueSeparator' => Products::SEPARATOR

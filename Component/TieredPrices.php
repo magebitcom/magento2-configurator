@@ -1,11 +1,20 @@
 <?php
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
-namespace CtiDigital\Configurator\Component;
+declare(strict_types=1);
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Component\Product\AttributeOption;
-use CtiDigital\Configurator\Exception\ComponentException;
+namespace Magebit\Configurator\Component;
+
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Component\Product\AttributeOption;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use FireGento\FastSimpleImport\Model\ImporterFactory;
 
 /**
@@ -16,69 +25,37 @@ class TieredPrices implements ComponentInterface
     const SKU_COLUMN_HEADING = 'sku';
     const SEPARATOR = ';';
 
-    protected $alias = 'tiered_prices';
-    protected $name = 'Tiered Prices';
-    protected $description = 'Component to import tiered prices using a CSV file.';
+    private const ALIAS = 'tiered_prices';
+    private const DESCRIPTION = 'Component to import tiered prices using a CSV file.';
 
-    /**
-     * @var ImporterFactory
-     */
-    protected $importerFactory;
+    /** @var string[] */
+    private array $successPrices = [];
 
-    /**
-     * @var AttributeOption
-     */
-    protected $attributeOption;
+    /** @var string[] */
+    private array $skippedPrices = [];
 
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
+    private int|false $skuColumn = false;
 
-    /**
-     * @var []
-     */
-    private $successPrices;
-
-    /**
-     * @var []
-     */
-    private $skippedPrices;
-
-    /**
-     * @var int
-     */
-    private $skuColumn;
-
-    /**
-     * TieredPrices constructor.
-     * @param ImporterFactory $importerFactory
-     * @param AttributeOption $attributeOption
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        ImporterFactory $importerFactory,
-        AttributeOption $attributeOption,
-        LoggerInterface $log
+        private readonly ImporterFactory $importerFactory,
+        private readonly AttributeOption $attributeOption,
+        private readonly LoggerInterface $log
     ) {
-        $this->importerFactory = $importerFactory;
-        $this->attributeOption = $attributeOption;
-        $this->log = $log;
     }
 
     /**
-     * @param null $data
-     *
      * @SuppressWarnings(PHPMD.CyclomaticComplexity)
      * @SuppressWarnings(PHPMD.NPathComplexity)
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         // Get the first row of the CSV file for the attribute columns.
         if (!isset($data[0])) {
-            throw new ComponentException(
-                sprintf('The row data is not valid.')
-            );
+            $result->addError('The row data is not valid.');
+            return $result;
         }
         $attributeKeys = $this->getAttributesFromCsv($data);
         $this->skuColumn = $this->getSkuColumnIndex($attributeKeys);
@@ -109,28 +86,41 @@ class TieredPrices implements ComponentInterface
                     implode(PHP_EOL, $this->skippedPrices)
                 )
             );
+            $result->recordSkipped(count($this->skippedPrices));
         }
 
-        $this->log->logInfo(sprintf('Attempting to import %s rows', count($this->successPrices)));
+        $rowCount = count($this->successPrices);
+
+        if ($context->isDryRun()) {
+            $this->log->logInfo(sprintf('[dry-run] Would import %s rows', $rowCount));
+            $result->recordCreated($rowCount);
+            return $result;
+        }
+
+        $this->log->logInfo(sprintf('Attempting to import %s rows', $rowCount));
         try {
             $import = $this->importerFactory->create();
             $import->setEntityCode('advanced_pricing');
             $import->setMultipleValueSeparator(self::SEPARATOR);
             $import->processImport($pricesArray);
+            $this->log->logInfo($import->getLogTrace());
+            $this->log->logError($import->getErrorMessages());
+            $result->recordCreated($rowCount);
         } catch (\Exception $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
-        $this->log->logInfo($import->getLogTrace());
-        $this->log->logError($import->getErrorMessages());
+
+        return $result;
     }
 
     /**
      * Gets the first row of the CSV file as these should be the attribute keys
      *
-     * @param null $data
+     * @param array $data
      * @return array
      */
-    public function getAttributesFromCsv($data = null)
+    public function getAttributesFromCsv(array $data): array
     {
         $attributes = [];
         foreach ($data[0] as $attributeCode) {
@@ -142,28 +132,21 @@ class TieredPrices implements ComponentInterface
     /**
      * Get the column index of the SKU
      *
-     * @param $headers
-     *
-     * @return mixed
+     * @param array $headers
+     * @return int|false
      */
-    public function getSkuColumnIndex($headers)
+    public function getSkuColumnIndex(array $headers): int|false
     {
         return array_search(self::SKU_COLUMN_HEADING, $headers);
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

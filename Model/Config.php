@@ -1,12 +1,18 @@
 <?php
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
 declare(strict_types=1);
 
-namespace CtiDigital\Configurator\Model;
+namespace Magebit\Configurator\Model;
 
-use CtiDigital\Configurator\Api\Data\ConfigInterface;
+use Magebit\Configurator\Api\Data\ConfigInterface;
 use Magento\Framework\Model\AbstractModel;
-use CtiDigital\Configurator\Model\ResourceModel\ConfigResource;
+use Magebit\Configurator\Model\ResourceModel\ConfigResource;
 
 class Config extends AbstractModel implements ConfigInterface
 {

@@ -1,13 +1,14 @@
 <?php
 /**
- * @package  CtiDigital\Configurator
- * @author Bartosz Herba <bartoszherba@gmail.com>
- * @copyright 2017 CtiDigital
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
-namespace CtiDigital\Configurator\Component\Processor;
+namespace Magebit\Configurator\Component\Processor;
 
-use CtiDigital\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\LoggerInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
 

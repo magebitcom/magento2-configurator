@@ -1,88 +1,78 @@
 <?php
 /**
- * @package  CtiDigital\Configurator
- * @author Bartosz Herba <b.herba@ctidigital.com>
- * @copyright 2017 CtiDigital
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
-namespace CtiDigital\Configurator\Component;
+declare(strict_types=1);
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Component\CatalogPriceRules\CatalogPriceRulesProcessor;
-use Magento\CatalogRule\Api\Data\RuleInterfaceFactory;
+namespace Magebit\Configurator\Component;
 
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Component\CatalogPriceRules\CatalogPriceRulesProcessor;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
+
+/**
+ * Manages Catalog Price Rules by delegating to the CatalogPriceRulesProcessor.
+ */
 class CatalogPriceRules implements ComponentInterface
 {
-    /**
-     * @var string
-     */
-    protected $alias = 'catalog_price_rules';
+    private const ALIAS = 'catalog_price_rules';
+    private const DESCRIPTION = 'Component to manage Catalog Price Rules';
 
-    /**
-     * @var string
-     */
-    protected $name = 'Catalog Price Rules';
-
-    /**
-     * @var string
-     */
-    protected $description = 'Component to manage Catalog Price Rules';
-
-    /**
-     * @var CatalogPriceRulesProcessor
-     */
-    private $processor;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * CatalogPriceRules constructor.
-     *
-     * @param LoggerInterface $log
-     * @param CatalogPriceRulesProcessor $processor
-     */
     public function __construct(
-        CatalogPriceRulesProcessor $processor,
-        LoggerInterface $log
+        private readonly CatalogPriceRulesProcessor $processor,
+        private readonly LoggerInterface $log
     ) {
-        $this->processor = $processor;
-        $this->log = $log;
     }
 
     /**
-     * This method should be used to process the data and populate the Magento Database.
-     *
-     * @param $data
-     *
-     * @return void
+     * Process the data and populate the Magento database.
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
-        $rules = $data['rules'] ?: [];
-        $config = $data['config'] ?: [];
+        $result = new ComponentResult();
+        $data = $context->getData();
+
+        if (!isset($data['rules']) || !is_array($data['rules'])) {
+            $result->addError('No "rules" node found in the source data.');
+            return $result;
+        }
+
+        $rules = $data['rules'];
+        $config = $data['config'] ?? [];
+
+        $ruleCount = count($rules);
+
+        if ($context->isDryRun()) {
+            $this->log->logInfo(
+                sprintf('[dry-run] Would process %d Catalog Price Rule(s)', $ruleCount)
+            );
+            $result->recordCreated($ruleCount);
+
+            return $result;
+        }
 
         $this->processor->setData($rules)
             ->setConfig($config)
             ->process();
+
+        $result->recordCreated($ruleCount);
+
+        return $result;
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

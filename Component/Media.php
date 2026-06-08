@@ -1,43 +1,45 @@
 <?php
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
-namespace CtiDigital\Configurator\Component;
+declare(strict_types=1);
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
-use CtiDigital\Configurator\Api\LoggerInterface;
+namespace Magebit\Configurator\Component;
+
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Framework\App\Filesystem\DirectoryList;
 
 class Media implements ComponentInterface
 {
-    const FULL_ACCESS = 0777;
+    public const FULL_ACCESS = 0777;
 
-    protected $alias = 'media';
-    protected $name = 'Media';
-    protected $description = 'Component to download/maintain media.';
-
-    /**
-     * @var DirectoryList
-     */
-    protected $directoryList;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
+    private const ALIAS = 'media';
+    private const DESCRIPTION = 'Component to download/maintain media.';
 
     public function __construct(
-        DirectoryList $directoryList,
-        LoggerInterface $log
+        private readonly DirectoryList $directoryList,
+        private readonly LoggerInterface $log
     ) {
-        $this->directoryList = $directoryList;
-        $this->log = $log;
     }
 
-    /**
-     * @param $data
-     */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
+        if (!is_array($data) || $data === []) {
+            $result->addError('No "media" node found in the source data.');
+            return $result;
+        }
+
         try {
             // Load root media path
             $mediaPath = $this->directoryList->getPath(DirectoryList::MEDIA);
@@ -45,21 +47,30 @@ class Media implements ComponentInterface
             // Loop through top level nodes
             foreach ($data as $name => $childNode) {
                 // Create a child folder or file item
-                $this->createChildFolderFileItem($mediaPath, $name, $childNode);
+                $this->createChildFolderFileItem($mediaPath, $name, $childNode, $context->isDryRun(), $result);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
+
+        return $result;
     }
 
-    private function createChildFolderFileItem($currentPath, $name, $node, $nest = 0)
-    {
+    private function createChildFolderFileItem(
+        $currentPath,
+        $name,
+        $node,
+        bool $dryRun,
+        ComponentResult $result,
+        int $nest = 0
+    ): void {
         try {
             // Update the current path to the new path
             $newPath = $currentPath . DIRECTORY_SEPARATOR . $name;
 
             // Check if a folder exists and create if required
-            $this->checkAndCreateFolder($newPath, $name, $nest);
+            $this->checkAndCreateFolder($newPath, $name, $nest, $dryRun, $result);
 
             // If the node does not have a numeric index
             if (!is_numeric($name)) {
@@ -68,18 +79,22 @@ class Media implements ComponentInterface
                 // Loop through the child node
                 foreach ($node as $childName => $childNode) {
                     // Create a child folder
-                    $this->createChildFolderFileItem($newPath, $childName, $childNode, $nest);
+                    $this->createChildFolderFileItem($newPath, $childName, $childNode, $dryRun, $result, $nest);
                 }
 
                 return;
             }
 
             if (!isset($node['name'])) {
-                throw new ComponentException(sprintf('No name set for a child item in %s', $currentPath));
+                throw new ComponentException(
+                    (string) __('No name set for a child item in %1', $currentPath)
+                );
             }
 
             if (!isset($node['location'])) {
-                throw new ComponentException(sprintf('No location set for a child item in %s', $currentPath));
+                throw new ComponentException(
+                    (string) __('No location set for a child item in %1', $currentPath)
+                );
             }
 
             $newPath = $currentPath . DIRECTORY_SEPARATOR . $node['name'];
@@ -87,32 +102,35 @@ class Media implements ComponentInterface
             // phpcs:ignore Magento2.Functions.DiscouragedFunction
             if (file_exists($newPath)) {
                 $this->log->logComment(sprintf('File already exists: %s', $newPath), $nest);
+                $result->recordSkipped();
                 return;
             }
 
             // Download the file and place it in the price place
-            $this->downloadAndSetFile($newPath, $node, $nest);
+            $this->downloadAndSetFile($newPath, $node, $nest, $dryRun, $result);
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage(), $nest);
         }
     }
 
-    /**
-     * @param $newPath
-     * @param $name
-     * @param $nest
-     */
-    private function checkAndCreateFolder($newPath, $name, $nest)
+    private function checkAndCreateFolder($newPath, $name, int $nest, bool $dryRun, ComponentResult $result): void
     {
         // Check if the file/folder exists
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
         if (!file_exists($newPath)) {
             // If the node does not have a numeric index
             if (!is_numeric($name)) {
+                if ($dryRun) {
+                    $this->log->logInfo(sprintf('[dry-run] Would create new media directory %s', $name), $nest);
+                    $result->recordCreated();
+                    return;
+                }
+
                 // Then it is a directory so create it
                 // phpcs:ignore Magento2.Functions.DiscouragedFunction
                 mkdir($newPath, $this::FULL_ACCESS, true);
                 $this->log->logInfo(sprintf('Created new media directory %s', $name), $nest);
+                $result->recordCreated();
             }
 
             return;
@@ -121,37 +139,37 @@ class Media implements ComponentInterface
         // If the node does not have a numeric index
         if (!is_numeric($name)) {
             $this->log->logComment(sprintf('Directory Exists %s', $name), $nest);
+            $result->recordSkipped();
         }
     }
 
-    /**
-     * @param $path
-     * @param $node
-     * @param $nest
-     */
-    private function downloadAndSetFile($path, $node, $nest)
+    private function downloadAndSetFile($path, $node, int $nest, bool $dryRun, ComponentResult $result): void
     {
+        if ($dryRun) {
+            $this->log->logInfo(
+                sprintf('[dry-run] Would download contents of file from %s to %s', $node['location'], $path),
+                $nest
+            );
+            $result->recordCreated();
+            return;
+        }
+
         $this->log->logInfo(sprintf('Downloading contents of file from %s', $node['location']), $nest);
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
         $fileContents = file_get_contents($node['location']);
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
         file_put_contents($path, $fileContents);
         $this->log->logInfo(sprintf('Created new file: %s', $path), $nest);
+        $result->recordCreated();
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

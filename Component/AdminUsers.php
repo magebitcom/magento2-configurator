@@ -1,121 +1,116 @@
 <?php
-namespace CtiDigital\Configurator\Component;
+/**
+ * Copyright (c) 2016 CTI Digital
+ * Copyright (c) 2026 Magebit, Ltd.
+ *
+ * Licensed under the MIT License; see the LICENSE file in the project root.
+ */
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use Magento\User\Model\UserFactory;
+declare(strict_types=1);
+
+namespace Magebit\Configurator\Component;
+
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Authorization\Model\RoleFactory;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
+use Magento\Framework\Validator\Exception as ValidatorException;
+use Magento\User\Model\ResourceModel\User as UserResource;
+use Magento\User\Model\UserFactory;
 
 /**
+ * Creates admin users and assigns them to a role, from configurator YAML.
+ *
  * @SuppressWarnings(PHPMD.ShortVariable)
  */
 class AdminUsers implements ComponentInterface
 {
-    protected $alias = 'adminusers';
-    protected $name = 'Admin Users';
-    protected $description = 'Component to create Admin Users';
+    private const ALIAS = 'adminusers';
+    private const DESCRIPTION = 'Component to create admin users.';
 
-    /**
-     * Factory class for user model
-     *
-     * @var UserFactory
-     */
-    protected $userFactory;
+    private const REQUIRED_USER_FIELDS = ['username', 'firstname', 'secondname', 'email', 'password'];
 
-    /**
-     * RoleFactory
-     *
-     * @var roleFactory
-     */
-    protected $roleFactory;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * AdminUsers constructor.
-     * @param UserFactory $userFactory
-     * @param RoleFactory $roleFactory
-     * @param LoggerInterface $log
-     */
     public function __construct(
-        UserFactory $userFactory,
-        RoleFactory $roleFactory,
-        LoggerInterface $log
+        private readonly UserFactory $userFactory,
+        private readonly UserResource $userResource,
+        private readonly RoleFactory $roleFactory,
+        private readonly LoggerInterface $log
     ) {
-        $this->userFactory = $userFactory;
-        $this->roleFactory = $roleFactory;
-        $this->log = $log;
     }
 
-    /**
-     * @param data
-     */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
-        //Get Each Role
+        $result = new ComponentResult();
+        $data = $context->getData();
+
+        if (!isset($data['adminusers']) || !is_array($data['adminusers'])) {
+            $result->addError('No "adminusers" node found in the source data.');
+            return $result;
+        }
+
         foreach ($data['adminusers'] as $roleSet) {
-            $roleName = $roleSet['rolename'];
-            $roleId = $this->getUserRoleFromName($roleName);
+            $roleName = $roleSet['rolename'] ?? null;
+            $roleId = $roleName !== null ? $this->getUserRoleFromName((string) $roleName) : null;
 
-            if ($roleId == null) {
-                $this->log->logError(
-                    sprintf('Admin Role "%s" does not exist', $roleName)
-                );
-
-                return;
+            if ($roleId === null) {
+                $message = sprintf('Admin Role "%s" does not exist', (string) $roleName);
+                $this->log->logError($message);
+                $result->addError($message);
+                continue;
             }
 
-            //Run through users in this Role
-            foreach ($roleSet['users'] as $userData) {
-                $validData = $this->dataValidator($userData);
-                try {
-                    if (!$validData) {
-                        return;
-                    }
+            foreach ($roleSet['users'] ?? [] as $userData) {
+                if (!$this->isValidUserData($userData, $result)) {
+                    continue;
+                }
 
-                    $this->createAdminUser($userData, $roleId);
-                } catch (\Magento\Framework\Validator\Exception $e) {
-                    $this->log->logError(sprintf('Magento Framework Validation Exception: %s', $e->getMessage()));
+                try {
+                    $this->createAdminUser($userData, $roleId, $context->isDryRun(), $result);
+                } catch (ValidatorException $e) {
+                    $message = sprintf('Magento Framework Validation Exception: %s', $e->getMessage());
+                    $this->log->logError($message);
+                    $result->addError($message);
                 } catch (ComponentException $e) {
                     $this->log->logError($e->getMessage());
+                    $result->addError($e->getMessage());
                 }
             }
         }
+
+        return $result;
     }
 
     /**
-     * Create new Admin User
+     * Create an admin user, skipping creation when one with the email already exists.
      *
-     * @param $userData
-     * @param $roleId
+     * @param array $userData
      */
-    private function createAdminUser($userData, $roleId)
+    private function createAdminUser(array $userData, int $roleId, bool $dryRun, ComponentResult $result): void
     {
+        $fullName = $userData['firstname'] . ' ' . $userData['secondname'];
+
         $user = $this->userFactory->create();
-        $userCount = $user->getCollection()->addFieldToFilter('email', $userData['email'])->getSize();
+        $exists = $user->getCollection()->addFieldToFilter('email', $userData['email'])->getSize() > 0;
 
-        if ($userCount > 0) {
-            $this->log->logComment(
-                sprintf(
-                    'Admin User "%s" creation skipped: User with the email "%s" already exists',
-                    $userData['firstname'] . ' ' . $userData['secondname'],
-                    $userData['email']
-                )
-            );
-
+        if ($exists) {
+            $this->log->logComment(sprintf(
+                'Admin User "%s" creation skipped: a user with the email "%s" already exists',
+                $fullName,
+                $userData['email']
+            ));
+            $result->recordSkipped();
             return;
         }
 
-        $this->log->logInfo(
-            sprintf(
-                'Admin User "%s" being created',
-                $userData['firstname'] . ' ' . $userData['secondname'] . ' :' . $userData['email']
-            )
-        );
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would create Admin User "%s" (%s)', $fullName, $userData['email']));
+            $result->recordCreated();
+            return;
+        }
+
+        $this->log->logInfo(sprintf('Admin User "%s" (%s) being created', $fullName, $userData['email']));
 
         $user
             ->setUserName($userData['username'])
@@ -130,69 +125,62 @@ class AdminUsers implements ComponentInterface
             $user->setInterfaceLocale($userData['interface_locale']);
         }
 
-        if ($user->validate()) {
-            $user->save();
-
-            $this->log->logInfo(
-                sprintf('Admin User "%s" created successfully', $userData['firstname'] . ' ' . $userData['secondname'])
-            );
+        if ($user->validate() !== true) {
+            $message = sprintf('Admin User "%s" failed validation and was not created', $fullName);
+            $this->log->logError($message);
+            $result->addError($message);
+            return;
         }
+
+        $this->userResource->save($user);
+        $result->recordCreated();
+        $this->log->logInfo(sprintf('Admin User "%s" created successfully', $fullName));
     }
 
     /**
-     * Get ID of Role by Name
-     *
-     * @param $roleName
-     * @return int|null
+     * Resolve a role id from its name.
      */
-    private function getUserRoleFromName($roleName)
+    private function getUserRoleFromName(string $roleName): ?int
     {
-        $role = $this->roleFactory->create();
-        $role = $role->getCollection()->addFieldToFilter('role_name', $roleName)->getFirstItem();
+        $role = $this->roleFactory->create()
+            ->getCollection()
+            ->addFieldToFilter('role_name', $roleName)
+            ->getFirstItem();
 
-        return $role->getId();
+        return $role->getId() ? (int) $role->getId() : null;
     }
 
     /**
-     *  Validate that required data is not empty
+     * Ensure all required user fields are present and non-empty.
      *
-     * @param $userData
-     * @return bool
+     * @param mixed $userData
      */
-    private function dataValidator($userData)
+    private function isValidUserData($userData, ComponentResult $result): bool
     {
-        $params = ['username', 'firstname', 'secondname', 'email', 'password'];
-        $invalidParams = [];
-
-        //->save() will warn if incorrect email or password details, just need to ensure values exist
-        foreach ($params as $param) {
-            if (!isset($userData[$param]) && $userData[$param] == '') {
-                $invalidParams[] = $userData[$param];
+        $missing = [];
+        foreach (self::REQUIRED_USER_FIELDS as $field) {
+            if (!is_array($userData) || !isset($userData[$field]) || $userData[$field] === '') {
+                $missing[] = $field;
             }
         }
 
-        if (!empty($invalidParams)) {
-            $this->log->logError('Admin User data is missing: ' . implode(', ', $params));
-
+        if ($missing !== []) {
+            $message = 'Admin User data is missing required field(s): ' . implode(', ', $missing);
+            $this->log->logError($message);
+            $result->addError($message);
             return false;
         }
 
         return true;
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }

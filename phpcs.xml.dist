@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<ruleset name="Magebit Configurator">
+    <description>Magento 2 coding standard for the Configurator module.</description>
+
+    <file>Api</file>
+    <file>Component</file>
+    <file>Console</file>
+    <file>Exception</file>
+    <file>Model</file>
+    <file>ViewModel</file>
+
+    <arg name="extensions" value="php"/>
+    <arg value="sp"/>
+    <arg name="colors"/>
+
+    <rule ref="Magento2"/>
+</ruleset>

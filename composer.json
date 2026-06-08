@@ -1,7 +1,8 @@
 {
   "name": "magebit/module-magento2-configurator",
-  "description": "Keep magento persistently configured using files",
+  "description": "Keep Magento persistently configured using version-controlled files.",
   "type": "magento2-module",
+  "license": "MIT",
   "repositories": [
     {
       "type": "composer",
@@ -9,24 +10,23 @@
     }
   ],
   "require": {
-    "symfony/yaml": "~4.0|~5.0|~6.0|~7.0",
+    "php": ">=8.1 <8.6",
+    "symfony/yaml": "~6.0|~7.0",
     "firegento/fastsimpleimport": "^2.0"
   },
   "require-dev": {
-    "phpmd/phpmd": "^2.6",
-    "squizlabs/php_codesniffer": "^3.4",
-    "sebastian/phpcpd": "~3.0 || ~4.0",
-    "satooshi/php-coveralls": "^1.0",
-    "phpunit/phpunit": "^6.2",
-    "magento/magento-coding-standard": "5"
+    "phpunit/phpunit": "^10.5 || ^11.0",
+    "magento/magento-coding-standard": "*",
+    "phpstan/phpstan": "^1.12",
+    "bitexpert/phpstan-magento": "^0.30 || ^1.0",
+    "phpmd/phpmd": "^2.15"
   },
-  "version": "1.0.5",
   "autoload": {
     "files": [
       "registration.php"
     ],
     "psr-4": {
-      "CtiDigital\\Configurator\\": ""
+      "Magebit\\Configurator\\": ""
     }
   }
 }

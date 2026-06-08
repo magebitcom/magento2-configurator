@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<!--
+  Unit tests for the Configurator module. Run from within a Magento install
+  (the module lives in vendor/magebit/module-magento2-configurator), so the
+  bootstrap resolves to the application's composer autoloader two levels up.
+
+  From the module directory:
+      ../../../vendor/bin/phpunit -c phpunit.xml.dist
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.5/phpunit.xsd"
+         bootstrap="../../autoload.php"
+         colors="true"
+         failOnWarning="true"
+         failOnRisky="true">
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>Test/Unit</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>Api</directory>
+            <directory>Component</directory>
+            <directory>Model</directory>
+        </include>
+    </source>
+</phpunit>
