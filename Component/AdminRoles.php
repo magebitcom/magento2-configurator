@@ -6,79 +6,56 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
-use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magento\Authorization\Model\Acl\Role\Group as RoleGroup;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\Authorization\Model\RulesFactory;
 use Magento\Authorization\Model\UserContextInterface;
-use Magento\Authorization\Model\Acl\Role\Group as RoleGroup;
 
 /**
+ * Creates admin roles and assigns their ACL resources from configurator YAML.
+ *
  * @SuppressWarnings(PHPMD.ShortVariable)
  */
 class AdminRoles implements ComponentInterface
 {
-    protected $alias = 'adminroles';
-    protected $name = 'Admin Roles';
-    protected $description = 'Component to create Admin Roles';
+    private const ALIAS = 'adminroles';
+    private const DESCRIPTION = 'Component to create admin roles.';
 
-    /**
-     * RoleFactory
-     *
-     * @var roleFactory
-     */
-    protected $roleFactory;
-
-    /**
-     * RulesFactory
-     *
-     * @var rulesFactory
-     */
-    protected $rulesFactory;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * AdminRoles constructor.
-     * @param RoleFactory $roleFactory
-     * @param RulesFactory $rulesFactory
-     */
     public function __construct(
-        RoleFactory $roleFactory,
-        RulesFactory $rulesFactory,
-        LoggerInterface $log
+        private readonly RoleFactory $roleFactory,
+        private readonly RulesFactory $rulesFactory,
+        private readonly LoggerInterface $log
     ) {
-        $this->roleFactory = $roleFactory;
-        $this->rulesFactory = $rulesFactory;
-        $this->log = $log;
     }
 
-    /**
-     * @param $data
-     */
     public function execute(ComponentContext $context): ComponentResult
     {
         $result = new ComponentResult();
         $data = $context->getData();
 
-        if (isset($data['adminroles'])) {
-            foreach ($data['adminroles'] as $role) {
-                try {
-                    if (isset($role['name'])) {
-                        $this->createAdminRole($role['name'], $role['resources']);
-                    }
-                } catch (ComponentException $e) {
-                    $this->log->logError($e->getMessage());
-                    $result->addError($e->getMessage());
+        if (!isset($data['adminroles']) || !is_array($data['adminroles'])) {
+            $result->addError('No "adminroles" node found in the source data.');
+            return $result;
+        }
+
+        foreach ($data['adminroles'] as $role) {
+            try {
+                if (!isset($role['name'])) {
+                    throw new ComponentException((string) __('An adminroles entry is missing the "name" key.'));
                 }
+                $this->createAdminRole($role['name'], $role['resources'] ?? null, $context->isDryRun(), $result);
+            } catch (ComponentException $e) {
+                $this->log->logError($e->getMessage());
+                $result->addError($e->getMessage());
             }
         }
 
@@ -86,32 +63,34 @@ class AdminRoles implements ComponentInterface
     }
 
     /**
-     * Create Admin user roles, or update them if they exist
+     * Create the admin role (or update its resources if it already exists).
      *
      * @param string $roleName
-     * @param array $resources
+     * @param array|null $resources
      */
-    private function createAdminRole($roleName, $resources)
-    {
+    private function createAdminRole(
+        string $roleName,
+        ?array $resources,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
         $role = $this->roleFactory->create();
-        $roleCount = $role->getCollection()->addFieldToFilter('role_name', $roleName)->getSize();
+        $existing = $role->getCollection()->addFieldToFilter('role_name', $roleName)->getFirstItem();
 
-        // Create or get existing user
-        if ($roleCount > 0) {
-            $this->log->logInfo(
-                sprintf('Admin Role "%s" creation skipped: Already exists in database', $roleName)
-            );
-
-            //Get exisiting Role
-            $role = $role->getCollection()->addFieldToFilter('role_name', $roleName)->getFirstItem();
-            $this->setResourceIds($role, $resources);
-
+        if ($existing->getId()) {
+            $this->log->logInfo(sprintf('Admin Role "%s" already exists, creation skipped', $roleName));
+            $result->recordSkipped();
+            $this->setResourceIds($existing, $resources, $dryRun);
             return;
         }
 
-        $this->log->logInfo(
-            sprintf('Admin Role "%s" being created', $roleName)
-        );
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would create Admin Role "%s"', $roleName));
+            $result->recordCreated();
+            return;
+        }
+
+        $this->log->logInfo(sprintf('Admin Role "%s" being created', $roleName));
 
         $role->setRoleName($roleName)
             ->setParentId(0)
@@ -120,46 +99,43 @@ class AdminRoles implements ComponentInterface
             ->setSortOrder(0)
             ->save();
 
-        $this->setResourceIds($role, $resources);
+        $result->recordCreated();
+        $this->setResourceIds($role, $resources, $dryRun);
     }
 
     /**
-     * Set ResourceIDs the Admin Role will have access to
+     * Assign the resource ids the admin role may access.
      *
-     * @param role
+     * @param \Magento\Authorization\Model\Role $role
      * @param array|null $resources
      */
-    private function setResourceIds($role, ?array $resources = null)
+    private function setResourceIds($role, ?array $resources, bool $dryRun): void
     {
         $roleName = $role->getRoleName();
 
-        if ($resources !== null) {
-            $this->log->logInfo(
-                sprintf('Admin Role "%s" resources updating', $roleName)
+        if ($resources === null) {
+            $this->log->logError(
+                sprintf('Admin Role "%s" resources are empty, please check your yaml file', $roleName)
             );
-
-            $this->rulesFactory->create()->setRoleId($role->getId())->setResources($resources)->saveRel();
             return;
         }
 
-        $this->log->logError(
-            sprintf('Admin Role "%s" Resources are empty, please check your yaml file', $roleName)
-        );
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would update resources for Admin Role "%s"', $roleName));
+            return;
+        }
+
+        $this->log->logInfo(sprintf('Admin Role "%s" resources updating', $roleName));
+        $this->rulesFactory->create()->setRoleId($role->getId())->setResources($resources)->saveRel();
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }
