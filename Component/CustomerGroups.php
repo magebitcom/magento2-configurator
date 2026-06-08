@@ -6,162 +6,152 @@
  * Licensed under the MIT License; see the LICENSE file in the project root.
  */
 
+declare(strict_types=1);
+
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
-use Magento\Customer\Model\GroupFactory;
-use Magento\Tax\Model\ClassModelFactory;
-use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Exception\ComponentException;
+use Magento\Customer\Api\Data\GroupInterface;
+use Magento\Customer\Api\Data\GroupInterfaceFactory;
+use Magento\Customer\Api\GroupRepositoryInterface;
+use Magento\Framework\Api\SearchCriteriaBuilder;
+use Magento\Tax\Api\TaxClassRepositoryInterface;
 
 /**
+ * Creates customer groups, each linked to a tax class, from configurator YAML.
+ *
  * @SuppressWarnings(PHPMD.ShortVariable)
  */
 class CustomerGroups implements ComponentInterface
 {
-    protected $alias = 'customergroups';
-    protected $name = 'Customer Groups';
-    protected $description = 'Component to create Customer Groups';
+    private const ALIAS = 'customergroups';
+    private const DESCRIPTION = 'Component to create customer groups.';
 
-    /**
-     * @var GroupFactory
-     */
-    private $groupFactory;
+    /** Magento's customer_group_code column is limited to this many characters. */
+    private const MAX_GROUP_NAME_LENGTH = 32;
 
-    /**
-     * @var ClassModelFactory
-     */
-    protected $classModelFactory;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $log;
-
-    /**
-     * AdminRoles constructor.
-     * @param LoggerInterface $log
-     * @param ObjectManagerInterface $objectManager
-     * @param GroupFactory $groupFactory
-     * @param ClassModelFactory $classModelFactory
-     */
     public function __construct(
-        GroupFactory $groupFactory,
-        ClassModelFactory $classModelFactory,
-        LoggerInterface $log
+        private readonly GroupRepositoryInterface $groupRepository,
+        private readonly GroupInterfaceFactory $groupFactory,
+        private readonly TaxClassRepositoryInterface $taxClassRepository,
+        private readonly SearchCriteriaBuilder $searchCriteriaBuilder,
+        private readonly LoggerInterface $log
     ) {
-        $this->groupFactory = $groupFactory;
-        $this->classModelFactory = $classModelFactory;
-        $this->log = $log;
     }
 
     /**
-     * @param $data
+     * Signature is pinned to ComponentInterface::execute() until the v2
+     * interface redesign; the body is the modern reference implementation.
+     *
+     * @param array|null $data
      */
-    public function execute($data = null)
+    public function execute($data = null): void
     {
-        foreach ($data['customergroups'] as $taxClass) {
-            $taxClassName = $taxClass['taxclass'];
-            $taxClassId = $this->getTaxClassIdFromName($taxClassName);
+        if (!isset($data['customergroups']) || !is_array($data['customergroups'])) {
+            $this->log->logError('No "customergroups" node found in the source data.');
+            return;
+        }
 
-            if ($taxClassId) {
-                foreach ($taxClass['groups'] as $group) {
-                    try {
-                        $this->validateGroupName($group);
-                        $this->createCustomerGroup($group['name'], $taxClassId);
-                    } catch (ComponentException $e) {
-                        $this->log->logError($e->getMessage());
-                    }
+        foreach ($data['customergroups'] as $taxClassConfig) {
+            $taxClassName = $taxClassConfig['taxclass'] ?? null;
+            $taxClassId = $taxClassName !== null ? $this->getTaxClassIdByName((string) $taxClassName) : null;
+
+            if ($taxClassId === null) {
+                continue;
+            }
+
+            foreach ($taxClassConfig['groups'] ?? [] as $group) {
+                try {
+                    $this->createCustomerGroup($this->extractGroupName($group), $taxClassId);
+                } catch (ComponentException $e) {
+                    $this->log->logError($e->getMessage());
                 }
             }
         }
     }
 
     /**
-     * Create Customer Groups from YAML file
-     *
-     * @param string $groupName
-     * @param int $taxClassId
+     * Create a customer group, skipping creation when one with the same code exists.
      */
-    private function createCustomerGroup($groupName, $taxClassId)
+    private function createCustomerGroup(string $groupName, int $taxClassId): void
     {
-        $customerGroup = $this->groupFactory->create();
-        $groupCount = $customerGroup->getCollection()->addFieldToFilter('customer_group_code', $groupName)->getSize();
-
-        if ($groupCount > 0) {
-            $this->log->logInfo(
-                sprintf('Customer Group "%s" already exists, creation skipped', $groupName)
-            );
-
+        if ($this->groupExists($groupName)) {
+            $this->log->logInfo(sprintf('Customer Group "%s" already exists, creation skipped', $groupName));
             return;
         }
 
-        $customerGroup
-            ->setCustomerGroupCode($groupName)
-            ->setTaxClassId($taxClassId)
-            ->save();
+        $group = $this->groupFactory->create();
+        $group->setCode($groupName);
+        $group->setTaxClassId($taxClassId);
+        $this->groupRepository->save($group);
 
-        $this->log->logInfo(
-            sprintf('Customer Group "%s" created', $groupName)
-        );
+        $this->log->logInfo(sprintf('Customer Group "%s" created', $groupName));
+    }
+
+    private function groupExists(string $groupName): bool
+    {
+        $criteria = $this->searchCriteriaBuilder
+            ->addFilter(GroupInterface::CODE, $groupName)
+            ->create();
+
+        return $this->groupRepository->getList($criteria)->getTotalCount() > 0;
     }
 
     /**
-     * perform customer group name validation
+     * Validate and return the group name from a single group config entry.
      *
      * @param array $group
-     * @return null
-     * @throw ComponentException
+     * @throws ComponentException
      */
-    private function validateGroupName(array $group)
+    private function extractGroupName(array $group): string
     {
-        if (!isset($group['name'])) {
-            throw new ComponentException(__('The customer group name is mandatory'));
+        if (!isset($group['name']) || $group['name'] === '') {
+            throw new ComponentException((string) __('The customer group name is mandatory'));
         }
 
-        if (strlen($group['name'])>32) {
-            throw new ComponentException(
-                __('The customer group name "%1" is too long (maximum length is 32 characters)', $group['name'])
-            );
+        $name = (string) $group['name'];
+        if (strlen($name) > self::MAX_GROUP_NAME_LENGTH) {
+            throw new ComponentException((string) __(
+                'The customer group name "%1" is too long (maximum length is %2 characters)',
+                $name,
+                self::MAX_GROUP_NAME_LENGTH
+            ));
         }
+
+        return $name;
     }
 
     /**
-     * Return tax class id when given name
-     *
-     * @param string $taxClassName
-     * @return int|null
+     * Resolve a tax class id from its name, or null (logged) when it does not exist.
      */
-    private function getTaxClassIdFromName($taxClassName)
+    private function getTaxClassIdByName(string $taxClassName): ?int
     {
-        $taxClassModel = $this->classModelFactory->create();
-        $taxClass = $taxClassModel->getCollection()->addFieldToFilter('class_name', $taxClassName)->getFirstItem();
-        $taxclassId = $taxClass->getId();
+        $criteria = $this->searchCriteriaBuilder
+            ->addFilter('class_name', $taxClassName)
+            ->create();
 
-        if (!$taxclassId) {
+        $taxClasses = $this->taxClassRepository->getList($criteria)->getItems();
+        $taxClass = $taxClasses === [] ? null : current($taxClasses);
+
+        if ($taxClass === null) {
             $this->log->logError(
                 sprintf('There is no Tax class with the name "%s" in this database', $taxClassName)
             );
-
             return null;
         }
 
-        return $taxclassId;
+        return (int) $taxClass->getClassId();
     }
 
-    /**
-     * @return string
-     */
-    public function getAlias()
+    public function getAlias(): string
     {
-        return $this->alias;
+        return self::ALIAS;
     }
 
-    /**
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
-        return $this->description;
+        return self::DESCRIPTION;
     }
 }
