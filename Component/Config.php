@@ -177,7 +177,7 @@ class Config implements ComponentInterface
      */
     private function setGlobalConfig(
         string $path,
-        ?string $value = null,
+        mixed $value = null,
         int $encrypted = 0,
         string $mode = Processor::MODE_MAINTAIN,
         ?string $version = null,
@@ -228,7 +228,7 @@ class Config implements ComponentInterface
      */
     private function setWebsiteConfig(
         string $path,
-        ?string $value,
+        mixed $value,
         string $code,
         int $encrypted = 0,
         string $mode = Processor::MODE_MAINTAIN,
@@ -312,7 +312,7 @@ class Config implements ComponentInterface
      */
     private function setStoreConfig(
         string $path,
-        ?string $value,
+        mixed $value,
         string $code,
         int $encrypted = 0,
         string $mode = Processor::MODE_MAINTAIN,
