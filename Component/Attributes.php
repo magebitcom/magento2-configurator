@@ -163,7 +163,7 @@ class Attributes implements ComponentInterface
         }
         //swatch functionality
         $swatch = false;
-        if (in_array($attributeConfig['input'], ['swatch_text', 'swatch_visual'])) {
+        if (in_array($attributeConfig['input'] ?? null, ['swatch_text', 'swatch_visual'], true)) {
             $swatch = $attributeConfig['input'];
             $attributeConfig['input'] = 'select';
             $this->swatchMap = $attributeConfig['swatch'] ?? [];

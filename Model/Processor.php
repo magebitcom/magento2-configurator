@@ -322,6 +322,8 @@ class Processor
                         continue;
                     }
                     throw $e;
+                } catch (\Throwable $t) {
+                    $this->recordComponentFailure($componentAlias, $source, $t);
                 }
             }
         }
@@ -372,8 +374,34 @@ class Processor
                     continue;
                 }
                 throw $e;
+            } catch (\Throwable $t) {
+                $this->recordComponentFailure($componentAlias, $source, $t);
             }
         }
+    }
+
+    /**
+     * Record an unexpected component failure so the run can continue and still
+     * exit non-zero, instead of one broken component aborting everything.
+     *
+     * @param string $componentAlias
+     * @param string $source
+     * @param \Throwable $t
+     * @return void
+     */
+    private function recordComponentFailure($componentAlias, $source, \Throwable $t): void
+    {
+        $message = sprintf(
+            "[%s] %s failed on source '%s': %s (%s:%d)",
+            $componentAlias,
+            get_class($t),
+            $source,
+            $t->getMessage(),
+            basename($t->getFile()),
+            $t->getLine()
+        );
+        $this->log->logError($message);
+        $this->getRunResult()->addError($message);
     }
 
     /**
