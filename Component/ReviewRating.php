@@ -16,6 +16,8 @@ use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
 use Magento\Review\Model\Rating;
 use Magento\Review\Model\RatingFactory;
+use Magento\Review\Model\ResourceModel\Rating as RatingResource;
+use Magento\Review\Model\ResourceModel\Rating\Option as RatingOptionResource;
 use Magento\Review\Model\Rating\Entity;
 use Magento\Review\Model\Rating\EntityFactory;
 use Magento\Store\Api\StoreRepositoryInterface;
@@ -40,6 +42,8 @@ class ReviewRating implements ComponentInterface
         private readonly StoreRepositoryInterface $storeRepository,
         private readonly OptionFactory $optionFactory,
         private readonly EntityFactory $entityFactory,
+        private readonly RatingResource $ratingResource,
+        private readonly RatingOptionResource $optionResource,
         private readonly LoggerInterface $log
     ) {
     }
@@ -70,7 +74,7 @@ class ReviewRating implements ComponentInterface
                     continue;
                 }
 
-                $ratingModel->save();
+                $this->ratingResource->save($ratingModel);
                 $this->setOptions($ratingModel, $dryRun);
                 $this->log->logInfo((string) __('Updated review rating "%1"', $code));
                 $existed ? $result->recordUpdated() : $result->recordCreated();
@@ -180,7 +184,7 @@ class ReviewRating implements ComponentInterface
             $option->setCode($count);
             $option->setValue($count);
             $option->setPosition($count);
-            $option->save();
+            $this->optionResource->save($option);
         }
     }
 

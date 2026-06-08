@@ -16,6 +16,7 @@ use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
 use Magento\Authorization\Model\Acl\Role\Group as RoleGroup;
+use Magento\Authorization\Model\ResourceModel\Role as RoleResource;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\Authorization\Model\RulesFactory;
 use Magento\Authorization\Model\UserContextInterface;
@@ -32,6 +33,7 @@ class AdminRoles implements ComponentInterface
 
     public function __construct(
         private readonly RoleFactory $roleFactory,
+        private readonly RoleResource $roleResource,
         private readonly RulesFactory $rulesFactory,
         private readonly LoggerInterface $log
     ) {
@@ -96,8 +98,8 @@ class AdminRoles implements ComponentInterface
             ->setParentId(0)
             ->setRoleType(RoleGroup::ROLE_TYPE)
             ->setUserType(UserContextInterface::USER_TYPE_ADMIN)
-            ->setSortOrder(0)
-            ->save();
+            ->setSortOrder(0);
+        $this->roleResource->save($role);
 
         $result->recordCreated();
         $this->setResourceIds($role, $resources, $dryRun);

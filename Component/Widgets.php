@@ -23,6 +23,7 @@ use Magento\Framework\DataObject;
 use Magento\Framework\Serialize\SerializerInterface;
 use Magento\Store\Model\StoreFactory;
 use Magento\Theme\Model\ResourceModel\Theme\CollectionFactory as ThemeCollectionFactory;
+use Magento\Widget\Model\ResourceModel\Widget\Instance as WidgetInstanceResource;
 use Magento\Widget\Model\ResourceModel\Widget\Instance\Collection as WidgetCollection;
 use Magento\Widget\Model\Widget\Instance;
 use Magento\Widget\Model\Widget\InstanceFactory as WidgetInstanceFactory;
@@ -41,7 +42,8 @@ class Widgets implements ComponentInterface
         private readonly LoggerInterface $log,
         private readonly AppState $appState,
         private readonly BlockRepositoryInterface $blockRepository,
-        private readonly SearchCriteriaBuilder $criteriaBuilder
+        private readonly SearchCriteriaBuilder $criteriaBuilder,
+        private readonly WidgetInstanceResource $widgetResource
     ) {
     }
 
@@ -132,7 +134,7 @@ class Widgets implements ComponentInterface
             $this->appState->emulateAreaCode(
                 AppArea::AREA_FRONTEND,
                 function () use ($widget) {
-                    $widget->save();
+                    $this->widgetResource->save($widget);
                 }
             );
 

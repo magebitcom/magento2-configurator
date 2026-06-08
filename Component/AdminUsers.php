@@ -17,6 +17,7 @@ use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\Framework\Validator\Exception as ValidatorException;
+use Magento\User\Model\ResourceModel\User as UserResource;
 use Magento\User\Model\UserFactory;
 
 /**
@@ -33,6 +34,7 @@ class AdminUsers implements ComponentInterface
 
     public function __construct(
         private readonly UserFactory $userFactory,
+        private readonly UserResource $userResource,
         private readonly RoleFactory $roleFactory,
         private readonly LoggerInterface $log
     ) {
@@ -130,7 +132,7 @@ class AdminUsers implements ComponentInterface
             return;
         }
 
-        $user->save();
+        $this->userResource->save($user);
         $result->recordCreated();
         $this->log->logInfo(sprintf('Admin User "%s" created successfully', $fullName));
     }
