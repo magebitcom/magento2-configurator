@@ -222,7 +222,9 @@ class Processor
 
             // Loop through components and run them individually in the master.yaml order
             foreach ($master as $componentAlias => $componentConfig) {
-                if ($componentConfig['enabled'] === 0) continue;
+                if ($componentConfig['enabled'] === 0) {
+                    continue;
+                }
                 // Run the component in question
                 $areaCode = ($componentAlias === 'pages') ? Area::AREA_FRONTEND : Area::AREA_ADMINHTML;
                 $this->state->emulateAreaCode(
