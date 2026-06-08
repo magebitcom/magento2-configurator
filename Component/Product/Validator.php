@@ -1,8 +1,8 @@
 <?php
 
-namespace CtiDigital\Configurator\Component\Product;
+namespace Magebit\Configurator\Component\Product;
 
-use CtiDigital\Configurator\Component\Products;
+use Magebit\Configurator\Component\Products;
 use Firegento\FastSimpleImport\Model\Importer;
 use FireGento\FastSimpleImport\Model\Adapters\ImportAdapterFactoryInterface;
 

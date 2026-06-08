@@ -1,6 +1,6 @@
 <?php
 
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
 class Rewrite
 {

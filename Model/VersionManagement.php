@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace CtiDigital\Configurator\Model;
+namespace Magebit\Configurator\Model;
 
-use CtiDigital\Configurator\Api\Data\ConfigInterfaceFactory;
-use CtiDigital\Configurator\Api\Data\ConfigInterface;
-use CtiDigital\Configurator\Api\VersionManagementInterface;
+use Magebit\Configurator\Api\Data\ConfigInterfaceFactory;
+use Magebit\Configurator\Api\Data\ConfigInterface;
+use Magebit\Configurator\Api\VersionManagementInterface;
 
 class VersionManagement implements VersionManagementInterface
 {

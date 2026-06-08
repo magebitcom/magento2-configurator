@@ -1,8 +1,8 @@
 <?php
 
-namespace CtiDigital\Configurator\Api;
+namespace Magebit\Configurator\Api;
 
-use CtiDigital\Configurator\Model\Component\ComponentAbstract;
+use Magebit\Configurator\Model\Component\ComponentAbstract;
 
 interface ConfigInterface
 {

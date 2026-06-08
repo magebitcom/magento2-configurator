@@ -1,12 +1,12 @@
 <?php
 
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Api\VersionManagementInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
-use CtiDigital\Configurator\Model\Processor;
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\VersionManagementInterface;
+use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\Processor;
 use Magento\Config\Model\Config\Backend\Encrypted;
 use Magento\Config\Model\ResourceModel\Config as ConfigResource;
 use Magento\Config\Model\ResourceModel\Config\Data\CollectionFactory as ConfigCollectionFactory;

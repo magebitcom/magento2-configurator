@@ -1,8 +1,8 @@
 <?php
-namespace CtiDigital\Configurator\Test\Unit\Component;
+namespace Magebit\Configurator\Test\Unit\Component;
 
-use CtiDigital\Configurator\Component\Customers;
-use CtiDigital\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Component\Customers;
+use Magebit\Configurator\Exception\ComponentException;
 use FireGento\FastSimpleImport\Model\ImporterFactory;
 use Magento\Customer\Api\GroupRepositoryInterface;
 use Magento\Customer\Api\GroupManagementInterface;
@@ -10,7 +10,7 @@ use Magento\Framework\Api\SearchCriteriaBuilder;
 use Magento\Framework\Api\SearchCriteria;
 use Magento\Framework\Api\SearchResults;
 use Magento\Indexer\Model\IndexerFactory;
-use CtiDigital\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\LoggerInterface;
 use Magento\Customer\Model\Data\Group;
 
 class CustomersTest extends \PHPUnit\Framework\TestCase

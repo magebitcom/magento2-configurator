@@ -1,15 +1,15 @@
 <?php
 /**
- * @package  CtiDigital\Configurator
+ * @package  Magebit\Configurator
  * @author Bartosz Herba <b.herba@ctidigital.com>
  * @copyright 2017 CtiDigital
  */
 
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Component\CatalogPriceRules\CatalogPriceRulesProcessor;
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Component\CatalogPriceRules\CatalogPriceRulesProcessor;
 use Magento\CatalogRule\Api\Data\RuleInterfaceFactory;
 
 class CatalogPriceRules implements ComponentInterface

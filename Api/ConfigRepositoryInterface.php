@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace CtiDigital\Configurator\Api;
+namespace Magebit\Configurator\Api;
 
-use CtiDigital\Configurator\Api\Data\ConfigInterface;
+use Magebit\Configurator\Api\Data\ConfigInterface;
 
 interface ConfigRepositoryInterface
 {

@@ -1,13 +1,13 @@
 <?php
 
-namespace CtiDigital\Configurator\Model\Component;
+namespace Magebit\Configurator\Model\Component;
 
 use Magento\TestFramework\Helper\Bootstrap;
 use Magento\Framework\File\Csv;
 use Magento\Framework\Filesystem\Driver\File;
 use Magento\UrlRewrite\Model\UrlRewriteFactory;
 use Magento\UrlRewrite\Model\UrlRewrite;
-use CtiDigital\Configurator\Model\Component\Rewrite;
+use Magebit\Configurator\Model\Component\Rewrite;
 
 class RewritesTest extends \PHPUnit\Framework\TestCase
 {
@@ -35,7 +35,7 @@ class RewritesTest extends \PHPUnit\Framework\TestCase
 
         $this->rewritesCsvPath = sprintf("%s/../../Samples/Components/Rewrites/rewrites.csv", __DIR__);
         $this->rewritesComponent = Bootstrap::getObjectManager()
-            ->get('CtiDigital\Configurator\Model\Component\Rewrites');
+            ->get('Magebit\Configurator\Model\Component\Rewrites');
 
         /**
          * @var UrlRewriteFactory

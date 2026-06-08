@@ -1,9 +1,9 @@
 <?php
 
-namespace CtiDigital\Configurator\Model;
+namespace Magebit\Configurator\Model;
 
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Api\ComponentListInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\ComponentListInterface;
 use Magento\Framework\App\State;
 use Magento\Framework\Config\ScopeInterface;
 use Symfony\Component\Console\Output\ConsoleOutputInterface;

@@ -1,12 +1,12 @@
 <?php
 
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
 use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\Catalog\Api\Data\ProductLinkInterfaceFactory;
-use CtiDigital\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Exception\ComponentException;
 
 class ProductLinks implements ComponentInterface
 {

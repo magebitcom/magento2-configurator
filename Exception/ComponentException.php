@@ -1,5 +1,5 @@
 <?php
-namespace CtiDigital\Configurator\Exception;
+namespace Magebit\Configurator\Exception;
 
 class ComponentException extends \RuntimeException
 {

@@ -1,8 +1,8 @@
 <?php
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
 use Magento\Review\Model\Rating;
 use Magento\Review\Model\RatingFactory;
 use Magento\Review\Model\Rating\Entity;

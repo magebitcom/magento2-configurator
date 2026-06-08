@@ -1,10 +1,10 @@
 <?php
 
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Exception\ComponentException;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\TaxImportExport\Model\Rate\CsvImportHandler;
 

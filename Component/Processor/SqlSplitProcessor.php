@@ -1,13 +1,13 @@
 <?php
 /**
- * @package  CtiDigital\Configurator
+ * @package  Magebit\Configurator
  * @author Bartosz Herba <bartoszherba@gmail.com>
  * @copyright 2017 CtiDigital
  */
 
-namespace CtiDigital\Configurator\Component\Processor;
+namespace Magebit\Configurator\Component\Processor;
 
-use CtiDigital\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\LoggerInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
 

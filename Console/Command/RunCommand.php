@@ -1,9 +1,9 @@
 <?php
 
-namespace CtiDigital\Configurator\Console\Command;
+namespace Magebit\Configurator\Console\Command;
 
-use CtiDigital\Configurator\Exception\ConfiguratorAdapterException;
-use CtiDigital\Configurator\Model\Processor;
+use Magebit\Configurator\Exception\ConfiguratorAdapterException;
+use Magebit\Configurator\Model\Processor;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputDefinition;
 use Symfony\Component\Console\Input\InputInterface;

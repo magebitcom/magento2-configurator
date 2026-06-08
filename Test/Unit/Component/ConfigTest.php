@@ -1,8 +1,8 @@
 <?php
 
-namespace CtiDigital\Configurator\Test\Unit\Component;
+namespace Magebit\Configurator\Test\Unit\Component;
 
-use CtiDigital\Configurator\Component\Config;
+use Magebit\Configurator\Component\Config;
 use Magento\Config\Model\ResourceModel\Config as ConfigResource;
 use Magento\Framework\App\Config as ScopeConfig;
 use Magento\Theme\Model\ResourceModel\Theme\Collection;
@@ -10,7 +10,7 @@ use Magento\Theme\Model\ResourceModel\Theme\CollectionFactory;
 use Magento\Framework\Encryption\EncryptorInterface;
 use Magento\Store\Model\StoreFactory;
 use Magento\Store\Model\WebsiteFactory;
-use CtiDigital\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\LoggerInterface;
 
 class ConfigTest extends \PHPUnit\Framework\TestCase
 {

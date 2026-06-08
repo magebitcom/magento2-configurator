@@ -1,6 +1,6 @@
 <?php
 
-namespace CtiDigital\Configurator\Api;
+namespace Magebit\Configurator\Api;
 
 interface ComponentListInterface
 {

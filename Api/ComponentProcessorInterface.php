@@ -1,11 +1,11 @@
 <?php
 /**
- * @package  CtiDigital\Configurator
+ * @package  Magebit\Configurator
  * @author Bartosz Herba <b.herba@ctidigital.com>
  * @copyright 2017 CtiDigital
  */
 
-namespace CtiDigital\Configurator\Api;
+namespace Magebit\Configurator\Api;
 
 /**
  * Interface ComponentProcessorInterface

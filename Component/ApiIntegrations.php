@@ -1,13 +1,13 @@
 <?php
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
-use CtiDigital\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentInterface;
 use Magento\Integration\Model\IntegrationFactory;
 use Magento\Integration\Model\Oauth\TokenFactory;
-use CtiDigital\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\LoggerInterface;
 use Magento\Integration\Model\AuthorizationService;
 use Magento\Integration\Api\IntegrationServiceInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Exception\ComponentException;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)

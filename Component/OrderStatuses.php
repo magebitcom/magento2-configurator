@@ -1,9 +1,9 @@
 <?php
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Exception\ComponentException;
 use Magento\Sales\Model\Order\Status;
 use Magento\Sales\Model\Order\StatusFactory;
 use Magento\Sales\Model\ResourceModel\Order\Status as StatusResource;
@@ -11,7 +11,7 @@ use Magento\Sales\Model\ResourceModel\Order\StatusFactory as StatusResourceFacto
 
 /**
  * Class OrderStatuses
- * @package CtiDigital\Configurator\Component
+ * @package Magebit\Configurator\Component
  */
 class OrderStatuses implements ComponentInterface
 {

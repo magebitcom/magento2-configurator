@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace CtiDigital\Configurator\Model\ResourceModel\Config;
+namespace Magebit\Configurator\Model\ResourceModel\Config;
 
-use CtiDigital\Configurator\Model\Config;
-use CtiDigital\Configurator\Model\ResourceModel\ConfigResource;
+use Magebit\Configurator\Model\Config;
+use Magebit\Configurator\Model\ResourceModel\ConfigResource;
 use Magento\Framework\Model\ResourceModel\Db\Collection\AbstractCollection;
 
 class ConfigCollection extends AbstractCollection

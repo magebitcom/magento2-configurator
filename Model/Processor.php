@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace CtiDigital\Configurator\Model;
+namespace Magebit\Configurator\Model;
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\ComponentListInterface;
-use CtiDigital\Configurator\Api\FileComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentListInterface;
+use Magebit\Configurator\Api\FileComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Exception\ComponentException;
 use Exception;
 use Magento\Framework\App\Area;
 use Magento\Framework\App\State;

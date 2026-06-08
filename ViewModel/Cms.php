@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace CtiDigital\Configurator\ViewModel;
+namespace Magebit\Configurator\ViewModel;
 
 use Magento\Catalog\Model\Category;
 use Magento\Catalog\Model\ResourceModel\Category\CollectionFactory as CategoryCollectionFactory;

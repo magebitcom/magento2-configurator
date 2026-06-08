@@ -1,15 +1,15 @@
 <?php
 /**
- * @package  CtiDigital\Configurator
+ * @package  Magebit\Configurator
  * @author Bartosz Herba <bartoszherba@gmail.com>
  * @copyright 2017 CtiDigital
  */
 
-namespace CtiDigital\Configurator\Test\Unit\Processor;
+namespace Magebit\Configurator\Test\Unit\Processor;
 
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Component\Processor\SqlSplitProcessor;
-use CtiDigital\Configurator\Model\Logging;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Component\Processor\SqlSplitProcessor;
+use Magebit\Configurator\Model\Logging;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
 use Magento\Framework\DB\Adapter\Pdo\Mysql;

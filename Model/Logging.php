@@ -1,8 +1,8 @@
 <?php
 
-namespace CtiDigital\Configurator\Model;
+namespace Magebit\Configurator\Model;
 
-use CtiDigital\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\LoggerInterface;
 use Symfony\Component\Console\Output\ConsoleOutput;
 use Symfony\Component\Console\Output\OutputInterface;
 

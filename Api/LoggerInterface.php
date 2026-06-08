@@ -1,5 +1,5 @@
 <?php
-namespace CtiDigital\Configurator\Api;
+namespace Magebit\Configurator\Api;
 
 interface LoggerInterface
 {

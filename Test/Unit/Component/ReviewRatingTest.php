@@ -1,12 +1,12 @@
 <?php
-namespace CtiDigital\Configurator\Test\Unit\Component;
+namespace Magebit\Configurator\Test\Unit\Component;
 
-use CtiDigital\Configurator\Component\ReviewRating;
+use Magebit\Configurator\Component\ReviewRating;
 use Magento\Review\Model\RatingFactory;
 use Magento\Store\Api\StoreRepositoryInterface;
 use Magento\Review\Model\Rating\OptionFactory;
 use Magento\Review\Model\Rating\EntityFactory;
-use CtiDigital\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\LoggerInterface;
 
 class ReviewRatingTest extends \PHPUnit\Framework\TestCase
 {

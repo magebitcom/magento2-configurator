@@ -1,8 +1,8 @@
 <?php
 
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
-use CtiDigital\Configurator\Api\ComponentListInterface;
+use Magebit\Configurator\Api\ComponentListInterface;
 
 class ComponentList implements ComponentListInterface
 {

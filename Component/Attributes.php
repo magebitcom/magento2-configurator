@@ -1,10 +1,10 @@
 <?php
 
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
-use CtiDigital\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Api\LoggerInterface;
 use Magento\Catalog\Model\Product;
 use Magento\Eav\Api\AttributeRepositoryInterface;
 use Magento\Eav\Setup\EavSetup;

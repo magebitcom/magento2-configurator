@@ -1,15 +1,15 @@
 <?php
 /**
- * @package  CtiDigital\Configurator
+ * @package  Magebit\Configurator
  * @author Bartosz Herba <bartoszherba@gmail.com>
  * @copyright 2017 CtiDigital
  */
 
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Component\Processor\SqlSplitProcessor;
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Component\Processor\SqlSplitProcessor;
 
 /**
  * Class Sql - Runs raw SQL queries - generally a fallback for when a configurator component is not available.

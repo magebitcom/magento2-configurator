@@ -1,12 +1,12 @@
 <?php
-namespace CtiDigital\Configurator\Test\Unit\Component\Product;
+namespace Magebit\Configurator\Test\Unit\Component\Product;
 
-use CtiDigital\Configurator\Component\Product\Image;
+use Magebit\Configurator\Component\Product\Image;
 use Magento\Framework\Filesystem;
 use FireGento\FastSimpleImport\Model\Config;
 use Magento\Framework\HTTP\ZendClient;
 use Magento\Framework\HTTP\ZendClientFactory;
-use CtiDigital\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\LoggerInterface;
 
 class ImageTest extends \PHPUnit\Framework\TestCase
 {

@@ -75,7 +75,7 @@ It tests the following:
 
 ## Getting Started
 1. Create a `master.yaml` file in `<mage_root>/app/etc/`. (see `Samples/master.yaml`)
-2. Enable Modules `CtiDigital_Configurator`,`FireGento_FastSimpleImport`.
+2. Enable Modules `Magebit_Configurator`,`FireGento_FastSimpleImport`.
 3. Run `bin/magento configurator:run --env="<environment>"`
 
 ### Usage

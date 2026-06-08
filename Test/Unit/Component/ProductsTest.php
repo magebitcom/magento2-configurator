@@ -1,14 +1,14 @@
 <?php
-namespace CtiDigital\Configurator\Test\Unit\Component;
+namespace Magebit\Configurator\Test\Unit\Component;
 
-use CtiDigital\Configurator\Component\Products;
+use Magebit\Configurator\Component\Products;
 use FireGento\FastSimpleImport\Model\ImporterFactory;
 use Magento\Catalog\Model\ProductFactory;
 use Magento\Catalog\Model\Product;
-use CtiDigital\Configurator\Component\Product\Image;
-use CtiDigital\Configurator\Component\Product\AttributeOption;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Component\Product\ValidatorFactory;
+use Magebit\Configurator\Component\Product\Image;
+use Magebit\Configurator\Component\Product\AttributeOption;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Component\Product\ValidatorFactory;
 use Magento\Eav\Model\Entity\Attribute;
 
 class ProductsTest extends \PHPUnit\Framework\TestCase

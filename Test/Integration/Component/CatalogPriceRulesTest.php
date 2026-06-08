@@ -1,13 +1,13 @@
 <?php
 /**
- * @package  CtiDigital\Configurator
+ * @package  Magebit\Configurator
  * @author Bartosz Herba <b.herba@ctidigital.com>
  * @copyright 2017 CtiDigital
  */
 
-namespace CtiDigital\Configurator\Test\Integration\Component;
+namespace Magebit\Configurator\Test\Integration\Component;
 
-use CtiDigital\Configurator\Console\Command\RunCommand;
+use Magebit\Configurator\Console\Command\RunCommand;
 use Magento\CatalogRule\Model\ResourceModel\Rule\Collection;
 use Magento\CatalogRule\Model\RuleFactory;
 use Magento\Framework\ObjectManagerInterface;

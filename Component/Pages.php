@@ -1,13 +1,13 @@
 <?php
 
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
-use CtiDigital\Configurator\Api\ComponentInterface;
-use CtiDigital\Configurator\Api\LoggerInterface;
-use CtiDigital\Configurator\Api\VersionManagementInterface;
-use CtiDigital\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\VersionManagementInterface;
+use Magebit\Configurator\Exception\ComponentException;
 use Exception;
-use CtiDigital\Configurator\Model\Processor;
+use Magebit\Configurator\Model\Processor;
 use Magento\Cms\Api\Data\PageInterface;
 use Magento\Cms\Api\Data\PageInterfaceFactory;
 use Magento\Cms\Api\PageRepositoryInterface;
@@ -22,7 +22,7 @@ use Symfony\Component\Filesystem\Filesystem;
 use Magento\Framework\EntityManager\MetadataPool;
 
 /**
- * @see \CtiDigital\Configurator\Component\Pages
+ * @see \Magebit\Configurator\Component\Pages
  */
 class Pages implements ComponentInterface
 {

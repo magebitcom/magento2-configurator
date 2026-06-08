@@ -1,10 +1,10 @@
 <?php
 /**
- * This file is part of the CtiDigital_Configurator package.
+ * This file is part of the Magebit_Configurator package.
  *
  * DISCLAIMER
  *
- * Do not edit or add to this file if you wish to upgrade CtiDigital_Configurator
+ * Do not edit or add to this file if you wish to upgrade Magebit_Configurator
  * to newer versions in the future.
  *
  * @copyright Copyright (c) 2023 Magebit, Ltd. (https://magebit.com/)
@@ -14,7 +14,7 @@
 
 declare(strict_types=1);
 
-namespace CtiDigital\Configurator\Api\Data;
+namespace Magebit\Configurator\Api\Data;
 
 interface ConfigInterface
 {

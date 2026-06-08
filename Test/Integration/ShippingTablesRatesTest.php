@@ -1,5 +1,5 @@
 <?php
-namespace CtiDigital\Configurator\Component;
+namespace Magebit\Configurator\Component;
 
 use Magento\Store\Model\Website;
 use Magento\TestFramework\Helper\Bootstrap;
@@ -57,7 +57,7 @@ class ShippingTablesRatesTest extends \PHPUnit\Framework\TestCase
         );
 
         $this->shippingTableRatesComponent = Bootstrap::getObjectManager()
-            ->get('CtiDigital\Configurator\Model\Component\ShippingTableRates');
+            ->get('Magebit\Configurator\Model\Component\ShippingTableRates');
 
         $tableRatesFactory = Bootstrap::getObjectManager()
             ->get('Magento\OfflineShipping\Model\ResourceModel\Carrier\TablerateFactory');
