@@ -326,7 +326,7 @@ class Attributes implements ComponentInterface
             return;
         }
         $attribute->addData($attributeData);
-        $attribute->save();
+        $attribute->getResource()->save($attribute);
     }
 
     /**
@@ -352,7 +352,7 @@ class Attributes implements ComponentInterface
             return;
         }
         $attribute->addData($attributeData);
-        $attribute->save();
+        $attribute->getResource()->save($attribute);
     }
 
 

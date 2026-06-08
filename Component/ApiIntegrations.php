@@ -13,6 +13,7 @@ namespace Magebit\Configurator\Component;
 use Magebit\Configurator\Api\ComponentInterface;
 use Magento\Integration\Model\IntegrationFactory;
 use Magento\Integration\Model\Oauth\TokenFactory;
+use Magento\Integration\Model\ResourceModel\Oauth\Token as TokenResource;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magento\Integration\Model\AuthorizationService;
 use Magento\Integration\Api\IntegrationServiceInterface;
@@ -33,6 +34,7 @@ class ApiIntegrations implements ComponentInterface
         private readonly IntegrationServiceInterface $integrationService,
         private readonly AuthorizationService $authorizationService,
         private readonly TokenFactory $tokenFactory,
+        private readonly TokenResource $tokenResource,
         private readonly LoggerInterface $log
     ) {
     }
@@ -142,7 +144,7 @@ class ApiIntegrations implements ComponentInterface
         $token = $this->tokenFactory->create();
         $token->createVerifierToken($consumerId);
         $token->setType('access');
-        $token->save();
+        $this->tokenResource->save($token);
     }
 
     public function getAlias(): string

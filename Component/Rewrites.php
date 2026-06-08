@@ -17,6 +17,7 @@ use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
 use Magento\UrlRewrite\Model\UrlRewriteFactory;
 use Magento\UrlRewrite\Model\UrlPersistInterface;
+use Magento\UrlRewrite\Model\ResourceModel\UrlRewrite as UrlRewriteResource;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
@@ -39,6 +40,7 @@ class Rewrites implements ComponentInterface
     public function __construct(
         private readonly UrlPersistInterface $urlPersist,
         private readonly UrlRewriteFactory $urlRewriteFactory,
+        private readonly UrlRewriteResource $urlRewriteResource,
         private readonly LoggerInterface $log
     ) {
     }
@@ -167,8 +169,8 @@ class Rewrites implements ComponentInterface
             ->setRequestPath($rewriteArray[self::REQUEST_PATH_CSV_KEY])
             ->setTargetPath($rewriteArray[self::TARGET_PATH_CSV_KEY])
             ->setRedirectType($rewriteArray[self::REDIRECT_TYPE_CSV_KEY]) //301 or 302
-            ->setDescription($rewriteArray[self::DESCRIPTION_CSV_KEY])
-            ->save();
+            ->setDescription($rewriteArray[self::DESCRIPTION_CSV_KEY]);
+        $this->urlRewriteResource->save($rewrite);
 
         $this->log->logInfo(
             sprintf($successMessage, $rewriteArray[self::DESCRIPTION_CSV_KEY])

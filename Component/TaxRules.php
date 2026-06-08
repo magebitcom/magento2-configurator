@@ -18,6 +18,8 @@ use Magebit\Configurator\Model\ComponentResult;
 use Magento\Tax\Model\Calculation\RuleFactory;
 use Magento\Tax\Model\Calculation\RateFactory;
 use Magento\Tax\Model\ClassModelFactory;
+use Magento\Tax\Model\ResourceModel\Calculation\Rule as TaxRuleResource;
+use Magento\Tax\Model\ResourceModel\TaxClass as TaxClassResource;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
@@ -41,6 +43,8 @@ class TaxRules implements ComponentInterface
         private readonly RateFactory $rateFactory,
         private readonly ClassModelFactory $classModelFactory,
         private readonly RuleFactory $ruleFactory,
+        private readonly TaxRuleResource $taxRuleResource,
+        private readonly TaxClassResource $taxClassResource,
         private readonly LoggerInterface $log
     ) {
     }
@@ -188,8 +192,8 @@ class TaxRules implements ComponentInterface
                 }
 
                 $classModel->setClassName($name)
-                    ->setClassType($type)
-                    ->save();
+                    ->setClassType($type);
+                $this->taxClassResource->save($classModel);
                 $classId = $classModel->getId();
             }
 
@@ -235,8 +239,8 @@ class TaxRules implements ComponentInterface
             ->setProductTaxClassIds($ruleData['product_tax_class_ids'])
             ->setPriority($ruleData['priority'])
             ->setCalculateSubtotal($ruleData['calculate_subtotal'])
-            ->setPosition($ruleData['position'])
-            ->save();
+            ->setPosition($ruleData['position']);
+        $this->taxRuleResource->save($rule);
 
         $this->log->logInfo(
             sprintf('Tax Rule "%s" created.', $ruleData['code'])
