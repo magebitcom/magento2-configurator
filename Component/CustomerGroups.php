@@ -13,6 +13,8 @@ namespace Magebit\Configurator\Component;
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Customer\Api\Data\GroupInterface;
 use Magento\Customer\Api\Data\GroupInterfaceFactory;
 use Magento\Customer\Api\GroupRepositoryInterface;
@@ -41,44 +43,59 @@ class CustomerGroups implements ComponentInterface
     ) {
     }
 
-    /**
-     * Signature is pinned to ComponentInterface::execute() until the v2
-     * interface redesign; the body is the modern reference implementation.
-     *
-     * @param array|null $data
-     */
-    public function execute($data = null): void
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         if (!isset($data['customergroups']) || !is_array($data['customergroups'])) {
-            $this->log->logError('No "customergroups" node found in the source data.');
-            return;
+            $result->addError('No "customergroups" node found in the source data.');
+            return $result;
         }
 
         foreach ($data['customergroups'] as $taxClassConfig) {
             $taxClassName = $taxClassConfig['taxclass'] ?? null;
-            $taxClassId = $taxClassName !== null ? $this->getTaxClassIdByName((string) $taxClassName) : null;
+            if ($taxClassName === null) {
+                $result->addError('A "customergroups" entry is missing the required "taxclass" key.');
+                continue;
+            }
 
+            $taxClassId = $this->getTaxClassIdByName((string) $taxClassName, $result);
             if ($taxClassId === null) {
                 continue;
             }
 
             foreach ($taxClassConfig['groups'] ?? [] as $group) {
                 try {
-                    $this->createCustomerGroup($this->extractGroupName($group), $taxClassId);
+                    $this->createCustomerGroup($this->extractGroupName($group), $taxClassId, $context, $result);
                 } catch (ComponentException $e) {
                     $this->log->logError($e->getMessage());
+                    $result->addError($e->getMessage());
                 }
             }
         }
+
+        return $result;
     }
 
     /**
      * Create a customer group, skipping creation when one with the same code exists.
      */
-    private function createCustomerGroup(string $groupName, int $taxClassId): void
-    {
+    private function createCustomerGroup(
+        string $groupName,
+        int $taxClassId,
+        ComponentContext $context,
+        ComponentResult $result
+    ): void {
         if ($this->groupExists($groupName)) {
             $this->log->logInfo(sprintf('Customer Group "%s" already exists, creation skipped', $groupName));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($context->isDryRun()) {
+            $this->log->logInfo(sprintf('[dry-run] Would create Customer Group "%s"', $groupName));
+            $result->recordCreated();
             return;
         }
 
@@ -88,6 +105,7 @@ class CustomerGroups implements ComponentInterface
         $this->groupRepository->save($group);
 
         $this->log->logInfo(sprintf('Customer Group "%s" created', $groupName));
+        $result->recordCreated();
     }
 
     private function groupExists(string $groupName): bool
@@ -124,9 +142,9 @@ class CustomerGroups implements ComponentInterface
     }
 
     /**
-     * Resolve a tax class id from its name, or null (logged) when it does not exist.
+     * Resolve a tax class id from its name, or null (logged + recorded) when missing.
      */
-    private function getTaxClassIdByName(string $taxClassName): ?int
+    private function getTaxClassIdByName(string $taxClassName, ComponentResult $result): ?int
     {
         $criteria = $this->searchCriteriaBuilder
             ->addFilter('class_name', $taxClassName)
@@ -136,9 +154,9 @@ class CustomerGroups implements ComponentInterface
         $taxClass = $taxClasses === [] ? null : current($taxClasses);
 
         if ($taxClass === null) {
-            $this->log->logError(
-                sprintf('There is no Tax class with the name "%s" in this database', $taxClassName)
-            );
+            $message = sprintf('There is no Tax class with the name "%s" in this database', $taxClassName);
+            $this->log->logError($message);
+            $result->addError($message);
             return null;
         }
 

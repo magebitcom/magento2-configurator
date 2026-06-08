@@ -11,6 +11,8 @@ namespace Magebit\Configurator\Component;
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Component\Processor\SqlSplitProcessor;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 
 /**
  * Class Sql - Runs raw SQL queries - generally a fallback for when a configurator component is not available.
@@ -62,10 +64,13 @@ class Sql implements ComponentInterface
      *
      * @return void
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         if (!isset($data['sql'])) {
-            return;
+            return $result;
         }
 
         $this->log->logInfo('Beginning of custom queries configuration:');
@@ -78,6 +83,8 @@ class Sql implements ComponentInterface
             }
             $this->processor->process($name, $path);
         }
+
+        return $result;
     }
 
     /**

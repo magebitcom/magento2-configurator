@@ -11,6 +11,8 @@ namespace Magebit\Configurator\Component;
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\TaxImportExport\Model\Rate\CsvImportHandler;
 
@@ -47,8 +49,11 @@ class TaxRates implements ComponentInterface
      * @param null $data
      * @throws LocalizedException
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         try {
             // Sort data into the column order importExport requires
             $sortedData = $this->getSortedData($data);
@@ -68,7 +73,10 @@ class TaxRates implements ComponentInterface
             $this->log->logInfo('Tax rates finished importing, check the rates in the admin panel.');
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
+
+        return $result;
     }
 
     /**

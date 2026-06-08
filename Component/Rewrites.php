@@ -11,6 +11,8 @@ namespace Magebit\Configurator\Component;
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\UrlRewrite\Model\UrlRewriteFactory;
 use Magento\UrlRewrite\Model\UrlPersistInterface;
 
@@ -66,8 +68,11 @@ class Rewrites implements ComponentInterface
     /**
      * @param array|null $data
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         $headerRowAttributes = $this->getAttributesFromHeaderRow($data);
 
         $this->removeHeaderRow($data);
@@ -92,12 +97,15 @@ class Rewrites implements ComponentInterface
                 $this->createOrUpdateRewriteRule($rewriteArray);
             } catch (ComponentException $e) {
                 $this->log->logError($e->getMessage());
+                $result->addError($e->getMessage());
             }
         }
 
         $this->log->logInfo(
             self::URL_REWRITES_COMPLETE_MESSAGE
         );
+
+        return $result;
     }
 
     /**

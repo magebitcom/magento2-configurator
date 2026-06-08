@@ -13,6 +13,8 @@ use Magento\User\Model\UserFactory;
 use Magento\Authorization\Model\RoleFactory;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
@@ -61,8 +63,11 @@ class AdminUsers implements ComponentInterface
     /**
      * @param data
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         //Get Each Role
         foreach ($data['adminusers'] as $roleSet) {
             $roleName = $roleSet['rolename'];
@@ -73,7 +78,7 @@ class AdminUsers implements ComponentInterface
                     sprintf('Admin Role "%s" does not exist', $roleName)
                 );
 
-                return;
+                return $result;
             }
 
             //Run through users in this Role
@@ -81,7 +86,7 @@ class AdminUsers implements ComponentInterface
                 $validData = $this->dataValidator($userData);
                 try {
                     if (!$validData) {
-                        return;
+                        return $result;
                     }
 
                     $this->createAdminUser($userData, $roleId);
@@ -89,9 +94,12 @@ class AdminUsers implements ComponentInterface
                     $this->log->logError(sprintf('Magento Framework Validation Exception: %s', $e->getMessage()));
                 } catch (ComponentException $e) {
                     $this->log->logError($e->getMessage());
+                    $result->addError($e->getMessage());
                 }
             }
         }
+
+        return $result;
     }
 
     /**

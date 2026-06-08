@@ -14,6 +14,8 @@ use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
 use Exception;
 use Magebit\Configurator\Model\Processor;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Cms\Api\Data\BlockInterfaceFactory;
 use Magento\Cms\Model\Block;
 use Magento\Cms\Model\ResourceModel\Block\Collection;
@@ -61,15 +63,22 @@ class Blocks implements ComponentInterface
      * @param string $mode
      * @throws Exception
      */
-    public function execute($data = null, string $mode = Processor::MODE_MAINTAIN): void
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+        $mode = $context->getMode()->value;
+
         try {
             foreach ($data as $identifier => $data) {
                 $this->processBlock($identifier, $data, $mode);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
+
+        return $result;
     }
 
     /**

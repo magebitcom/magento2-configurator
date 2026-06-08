@@ -11,6 +11,8 @@ namespace Magebit\Configurator\Component;
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Store\Model\Group;
 use Magento\Store\Model\GroupFactory;
 use Magento\Store\Model\Store;
@@ -77,8 +79,11 @@ class Websites implements ComponentInterface
         $this->log = $log;
     }
 
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         try {
             if (!isset($data['websites'])) {
                 throw new ComponentException("No websites found.");
@@ -115,6 +120,8 @@ class Websites implements ComponentInterface
         } catch (\Exception $e) {
             $this->log->logError($e->getMessage());
         }
+
+        return $result;
     }
 
     /**

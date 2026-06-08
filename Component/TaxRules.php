@@ -11,6 +11,8 @@ namespace Magebit\Configurator\Component;
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Tax\Model\Calculation\RuleFactory;
 use Magento\Tax\Model\Calculation\RateFactory;
 use Magento\Tax\Model\ClassModelFactory;
@@ -76,8 +78,11 @@ class TaxRules implements ComponentInterface
     /**
      * @param array|null $data
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         //Check Row Data exists
         if (!isset($data[0])) {
             throw new ComponentException(
@@ -103,12 +108,15 @@ class TaxRules implements ComponentInterface
                 $this->createTaxRule($ruleData);
             } catch (ComponentException $e) {
                 $this->log->logError($e->getMessage());
+                $result->addError($e->getMessage());
             }
         }
 
         $this->log->logComment(
             sprintf('Tax Rules import finished')
         );
+
+        return $result;
     }
 
     /**

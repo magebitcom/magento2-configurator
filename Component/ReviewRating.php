@@ -10,6 +10,8 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Review\Model\Rating;
 use Magento\Review\Model\RatingFactory;
 use Magento\Review\Model\Rating\Entity;
@@ -81,8 +83,11 @@ class ReviewRating implements ComponentInterface
         $this->log = $log;
     }
 
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         $reviewRatings = $this->getReviewRatings($data);
 
         foreach ($reviewRatings as $code => $reviewRating) {
@@ -105,6 +110,8 @@ class ReviewRating implements ComponentInterface
                 );
             }
         }
+
+        return $result;
     }
 
     /**

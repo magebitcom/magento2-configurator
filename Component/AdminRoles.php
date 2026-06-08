@@ -11,6 +11,8 @@ namespace Magebit\Configurator\Component;
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\Authorization\Model\RulesFactory;
 use Magento\Authorization\Model\UserContextInterface;
@@ -62,8 +64,11 @@ class AdminRoles implements ComponentInterface
     /**
      * @param $data
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         if (isset($data['adminroles'])) {
             foreach ($data['adminroles'] as $role) {
                 try {
@@ -72,9 +77,12 @@ class AdminRoles implements ComponentInterface
                     }
                 } catch (ComponentException $e) {
                     $this->log->logError($e->getMessage());
+                    $result->addError($e->getMessage());
                 }
             }
         }
+
+        return $result;
     }
 
     /**

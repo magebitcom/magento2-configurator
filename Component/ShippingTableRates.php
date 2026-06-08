@@ -10,6 +10,8 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\OfflineShipping\Model\ResourceModel\Carrier\TablerateFactory;
 use Magento\OfflineShipping\Model\ResourceModel\Carrier\Tablerate;
 use Magento\Store\Model\WebsiteFactory;
@@ -68,8 +70,11 @@ class ShippingTableRates implements ComponentInterface
      * @param array $data
      * @return void
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         /** @var Tablerate $tablerateModel */
         $tablerateModel = $this->tablerateFactory->create();
 
@@ -83,7 +88,7 @@ class ShippingTableRates implements ComponentInterface
 
             if (!$websiteId) {
                 $this->log->logError(sprintf("No website exists for code '%s'. Skipping.", $website));
-                return;
+                return $result;
             }
 
             foreach ($shippingRates as $shippingRate) {
@@ -97,6 +102,8 @@ class ShippingTableRates implements ComponentInterface
                 $shippingRateCount++;
             }
         }
+
+        return $result;
     }
 
     /**

@@ -14,6 +14,8 @@ use Magebit\Configurator\Api\VersionManagementInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Exception;
 use Magebit\Configurator\Model\Processor;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Cms\Api\Data\PageInterface;
 use Magento\Cms\Api\Data\PageInterfaceFactory;
 use Magento\Cms\Api\PageRepositoryInterface;
@@ -77,15 +79,22 @@ class Pages implements ComponentInterface
      * @return void
      * @throws LocalizedException
      */
-    public function execute($data = null, string $mode = Processor::MODE_MAINTAIN): void
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+        $mode = $context->getMode()->value;
+
         try {
             foreach ($data as $identifier => $data) {
                 $this->processPage($identifier, $data, $mode);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
+
+        return $result;
     }
 
     /**

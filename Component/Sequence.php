@@ -10,6 +10,8 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\SalesSequence\Model\Builder;
 use Magento\SalesSequence\Model\EntityPool;
 use Magento\SalesSequence\Model\Config;
@@ -57,8 +59,11 @@ class Sequence implements ComponentInterface
         $this->logger = $logger;
     }
 
-    public function execute($data)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         if (!isset($data['stores'])) {
             throw new ComponentException("No stores found.");
         }
@@ -74,6 +79,8 @@ class Sequence implements ComponentInterface
                 $this->logger->logError($exception->getMessage());
             }
         }
+
+        return $result;
     }
 
     public function getAlias()

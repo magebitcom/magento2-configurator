@@ -11,6 +11,8 @@ namespace Magebit\Configurator\Component;
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Sales\Model\Order\Status;
 use Magento\Sales\Model\Order\StatusFactory;
 use Magento\Sales\Model\ResourceModel\Order\Status as StatusResource;
@@ -60,17 +62,23 @@ class OrderStatuses implements ComponentInterface
     /**
      * @param $data
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         if (isset($data['order_statuses'])) {
             foreach ($data['order_statuses'] as $statusSet) {
                 try {
                     $this->createOrderStatuses($statusSet);
                 } catch (ComponentException $e) {
                     $this->log->logError($e->getMessage());
+                    $result->addError($e->getMessage());
                 }
             }
         }
+
+        return $result;
     }
 
     /**

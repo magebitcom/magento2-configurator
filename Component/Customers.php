@@ -11,6 +11,8 @@ namespace Magebit\Configurator\Component;
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use FireGento\FastSimpleImport\Model\ImporterFactory;
 use Magento\ImportExport\Model\Import;
 use Magento\Framework\Api\SearchCriteriaBuilder;
@@ -99,8 +101,11 @@ class Customers implements ComponentInterface
      *
      * @SuppressWarnings(PHPMD.CyclomaticComplexity)
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         $this->getColumnHeaders($data);
         unset($data[0]);
 
@@ -161,6 +166,8 @@ class Customers implements ComponentInterface
         }
         $this->log->logInfo($importer->getLogTrace());
         $this->log->logInfo($importer->getErrorMessages());
+
+        return $result;
     }
 
     /**

@@ -15,6 +15,8 @@ use Magebit\Configurator\Api\LoggerInterface;
 use Magento\Integration\Model\AuthorizationService;
 use Magento\Integration\Api\IntegrationServiceInterface;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
@@ -75,8 +77,11 @@ class ApiIntegrations implements ComponentInterface
     /**
      * @param array $data
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         if (isset($data['apiintegrations'])) {
             foreach ($data['apiintegrations'] as $integrationData) {
                 try {
@@ -90,9 +95,12 @@ class ApiIntegrations implements ComponentInterface
                     $this->createApiIntegration($integrationData);
                 } catch (ComponentException $e) {
                     $this->log->logError($e->getMessage());
+                    $result->addError($e->getMessage());
                 }
             }
         }
+
+        return $result;
     }
 
     /**

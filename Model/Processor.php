@@ -12,9 +12,11 @@ namespace Magebit\Configurator\Model;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\ComponentListInterface;
-use Magebit\Configurator\Api\FileComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Exception;
 use Magento\Framework\App\Area;
 use Magento\Framework\App\State;
@@ -85,6 +87,16 @@ class Processor
     protected $ignoreMissingFiles = false;
 
     /**
+     * @var bool
+     */
+    protected $dryRun = false;
+
+    /**
+     * @var ComponentResult
+     */
+    protected $runResult;
+
+    /**
      * Processor constructor.
      * @param ComponentListInterface $componentList
      * @param State $state
@@ -132,6 +144,36 @@ class Processor
     }
 
     /**
+     * @param bool $dryRun
+     * @return void
+     */
+    public function setDryRun($dryRun): void
+    {
+        $this->dryRun = (bool) $dryRun;
+    }
+
+    /**
+     * @return bool
+     */
+    public function isDryRun(): bool
+    {
+        return $this->dryRun;
+    }
+
+    /**
+     * Aggregate outcome of the last run(); usable for reporting and exit codes.
+     *
+     * @return ComponentResult
+     */
+    public function getRunResult(): ComponentResult
+    {
+        if ($this->runResult === null) {
+            $this->runResult = new ComponentResult();
+        }
+        return $this->runResult;
+    }
+
+    /**
      * @param string $componentName
      * @return Processor
      */
@@ -172,6 +214,8 @@ class Processor
      */
     public function run(): void
     {
+        $this->runResult = new ComponentResult();
+
         // If the components list is empty, then the user would want to run all components in the master.yaml
         if (empty($this->components)) {
             $this->runAllComponents();
@@ -265,15 +309,13 @@ class Processor
 
         $sourceType = (isset($componentConfig['type']) === true) ? $componentConfig['type'] : null;
 
-        $mode = $componentConfig['env'][$this->getEnvironment()]['mode'] ?? self::MODE_CREATE;
+        $modeValue = $componentConfig['env'][$this->getEnvironment()]['mode'] ?? self::MODE_CREATE;
+        $mode = ComponentMode::tryFrom((string) $modeValue) ?? ComponentMode::Create;
 
         if (isset($componentConfig['sources'])) {
             foreach ($componentConfig['sources'] as $source) {
                 try {
-                    $sourceData = ($component instanceof FileComponentInterface) ?
-                        $source :
-                        $this->parseData($source, $sourceType);
-                    $component->execute($sourceData, $mode);
+                    $this->executeComponentSource($component, $componentAlias, $source, $sourceType, $mode);
                 } catch (ComponentException $e) {
                     if ($this->isIgnoreMissingFiles() === true) {
                         $this->log->logInfo("Skipping file {$source} as it could not be found.");
@@ -323,8 +365,7 @@ class Processor
         foreach ((array) $componentConfig['env'][$this->getEnvironment()]['sources'] as $source) {
             try {
                 $sourceType = (isset($componentConfig['type']) === true) ? $componentConfig['type'] : null;
-                $sourceData = $this->parseData($source, $sourceType);
-                $component->execute($sourceData, $mode);
+                $this->executeComponentSource($component, $componentAlias, $source, $sourceType, $mode);
             } catch (ComponentException $e) {
                 if ($this->isIgnoreMissingFiles() === true) {
                     $this->log->logInfo("Skipping file {$source} as it could not be found.");
@@ -333,6 +374,40 @@ class Processor
                 throw $e;
             }
         }
+    }
+
+    /**
+     * Build the context for a single source, run the component, and fold its
+     * result into the run-level total.
+     *
+     * @param ComponentInterface $component
+     * @param string $componentAlias
+     * @param string $source
+     * @param string|null $sourceType
+     * @param ComponentMode $mode
+     * @return void
+     */
+    private function executeComponentSource(
+        ComponentInterface $component,
+        $componentAlias,
+        $source,
+        $sourceType,
+        ComponentMode $mode
+    ): void {
+        $context = new ComponentContext(
+            (string) $source,
+            $mode,
+            $this->getEnvironment(),
+            $this->dryRun,
+            fn (string $path): array => $this->parseData($path, $sourceType)
+        );
+
+        $result = $component->execute($context);
+        $this->getRunResult()->merge($result);
+
+        // Components log their own per-item errors; the result drives the run
+        // summary and the command's exit code.
+        $this->log->logComment(sprintf("Component '%s' source '%s': %s", $componentAlias, $source, $result->summary()));
     }
 
     /**

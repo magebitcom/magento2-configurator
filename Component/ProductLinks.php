@@ -13,6 +13,8 @@ use Magebit\Configurator\Api\LoggerInterface;
 use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\Catalog\Api\Data\ProductLinkInterfaceFactory;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 
 class ProductLinks implements ComponentInterface
 {
@@ -59,8 +61,11 @@ class ProductLinks implements ComponentInterface
      *
      * @param $data
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         try {
             // Loop through all the product link types - if there are multiple link types in the yaml file
             foreach ($data as $linkType => $skus) {
@@ -74,9 +79,12 @@ class ProductLinks implements ComponentInterface
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         } catch (\Exception $e) {
             $this->log->logError($e->getMessage());
         }
+
+        return $result;
     }
 
     /**

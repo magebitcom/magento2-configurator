@@ -12,6 +12,8 @@ use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Component\Product\AttributeOption;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use FireGento\FastSimpleImport\Model\ImporterFactory;
 
 /**
@@ -78,8 +80,11 @@ class TieredPrices implements ComponentInterface
      * @SuppressWarnings(PHPMD.CyclomaticComplexity)
      * @SuppressWarnings(PHPMD.NPathComplexity)
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         // Get the first row of the CSV file for the attribute columns.
         if (!isset($data[0])) {
             throw new ComponentException(
@@ -128,6 +133,8 @@ class TieredPrices implements ComponentInterface
         }
         $this->log->logInfo($import->getLogTrace());
         $this->log->logError($import->getErrorMessages());
+
+        return $result;
     }
 
     /**

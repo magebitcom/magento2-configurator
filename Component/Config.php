@@ -13,6 +13,8 @@ use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Api\VersionManagementInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\Processor;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Config\Model\Config\Backend\Encrypted;
 use Magento\Config\Model\ResourceModel\Config as ConfigResource;
 use Magento\Config\Model\ResourceModel\Config\Data\CollectionFactory as ConfigCollectionFactory;
@@ -121,8 +123,12 @@ class Config implements ComponentInterface
      * @SuppressWarnings(PHPMD)
      * @throws LocalizedException
      */
-    public function execute($data = null, string $mode = Processor::MODE_MAINTAIN): void //phpcs:ignore Generic.Metrics.NestingLevel
+    public function execute(ComponentContext $context): ComponentResult //phpcs:ignore Generic.Metrics.NestingLevel
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+        $mode = $context->getMode()->value;
+
         try {
             $validScopes = ['global', 'websites', 'stores'];
             foreach ($data as $scope => $configurations) {
@@ -201,7 +207,10 @@ class Config implements ComponentInterface
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
+
+        return $result;
     }
 
     /**

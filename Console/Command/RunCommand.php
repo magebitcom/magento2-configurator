@@ -55,6 +55,13 @@ class RunCommand extends Command
             false
         );
 
+        $dryRun = new InputOption(
+            'dry-run',
+            'd',
+            InputOption::VALUE_NONE,
+            'Report what would change without persisting anything (components honour this as they are migrated)'
+        );
+
         $this
             ->setName('configurator:run')
             ->setDescription('Run configurator components')
@@ -62,7 +69,8 @@ class RunCommand extends Command
                 new InputDefinition([
                     $environmentOption,
                     $componentOption,
-                    $ignoreMissingFiles
+                    $ignoreMissingFiles,
+                    $dryRun
                 ])
             );
     }
@@ -86,6 +94,11 @@ class RunCommand extends Command
                 $this->processor->setIgnoreMissingFiles(true);
             }
 
+            if ($input->getOption('dry-run')) {
+                $this->processor->setDryRun(true);
+                $output->writeln('<comment>Dry run: no changes will be persisted (where supported)</comment>');
+            }
+
             $logLevel = OutputInterface::VERBOSITY_NORMAL;
             $verbose = $input->getOption('verbose');
 
@@ -106,13 +119,24 @@ class RunCommand extends Command
             $this->processor->getLogger()->setLogLevel($logLevel);
             $this->processor->run();
 
+            $result = $this->processor->getRunResult();
+            $output->writeln(sprintf('<info>Configurator finished: %s</info>', $result->summary()));
+
+            if (!$result->isSuccessful()) {
+                $output->writeln(sprintf(
+                    '<error>%d error(s) occurred during the run; see the log above.</error>',
+                    count($result->getErrors())
+                ));
+                return Command::FAILURE;
+            }
+
             if ($output->getVerbosity() > OutputInterface::VERBOSITY_NORMAL) {
                 $output->writeln('<comment>Finished Configurator</comment>');
             }
         } catch (\Exception $e) {
             $output->writeln('<error>' . $e->getMessage() . '</error>');
-            return 1;
+            return Command::FAILURE;
         }
-        return 0;
+        return Command::SUCCESS;
     }
 }

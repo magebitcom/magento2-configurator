@@ -11,6 +11,8 @@ namespace Magebit\Configurator\Component;
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Catalog\Model\Product;
 use Magento\Eav\Api\AttributeRepositoryInterface;
 use Magento\Eav\Setup\EavSetup;
@@ -141,15 +143,21 @@ class Attributes implements ComponentInterface
     /**
      * @param array $attributeConfigurationData
      */
-    public function execute($attributeConfigurationData = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $attributeConfigurationData = $context->getData();
+
         try {
             foreach ($attributeConfigurationData['attributes'] as $attributeCode => $attributeConfiguration) {
                 $this->processAttribute($attributeCode, $attributeConfiguration);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
+
+        return $result;
     }
 
     /**

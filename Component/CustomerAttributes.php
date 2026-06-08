@@ -10,6 +10,8 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Customer\Model\Customer;
 use Magento\Eav\Setup\EavSetup;
 use Magento\Framework\Exception\LocalizedException;
@@ -93,8 +95,11 @@ class CustomerAttributes extends Attributes
     /**
      * @param array $attributeConfigurationData
      */
-    public function execute($attributeConfigurationData = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $attributeConfigurationData = $context->getData();
+
         try {
             foreach ($attributeConfigurationData['customer_attributes'] as $attributeCode => $attributeConfiguration) {
                 $this->processAttribute($attributeCode, $attributeConfiguration);
@@ -102,7 +107,10 @@ class CustomerAttributes extends Attributes
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
+
+        return $result;
     }
 
     /**

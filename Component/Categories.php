@@ -12,6 +12,8 @@ use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\Processor;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Catalog\Model\Category;
 use Magento\Catalog\Model\CategoryFactory;
 use Magento\Cms\Model\BlockFactory;
@@ -89,8 +91,12 @@ class Categories implements ComponentInterface
      * @return void
      * @throws FileSystemException
      */
-    public function execute($data = null, string $mode = Processor::MODE_MAINTAIN): void
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+        $mode = $context->getMode()->value;
+
         if (isset($data['categories'])) {
             foreach ($data['categories'] as $store) {
                 try {
@@ -108,9 +114,12 @@ class Categories implements ComponentInterface
                     }
                 } catch (ComponentException $e) {
                     $this->log->logError($e->getMessage());
+                    $result->addError($e->getMessage());
                 }
             }
         }
+
+        return $result;
     }
 
     /**

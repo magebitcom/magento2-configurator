@@ -10,8 +10,11 @@ declare(strict_types=1);
 
 namespace Magebit\Configurator\Test\Unit\Component;
 
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Component\CustomerGroups;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magento\Customer\Api\Data\GroupInterface;
 use Magento\Customer\Api\Data\GroupInterfaceFactory;
 use Magento\Customer\Api\GroupRepositoryInterface;
@@ -69,9 +72,12 @@ class CustomerGroupsTest extends TestCase
 
         $this->groupRepository->expects($this->once())->method('save')->with($group);
 
-        $this->component->execute(['customergroups' => [
+        $result = $this->execute([
             ['taxclass' => 'Retail Customer', 'groups' => [['name' => 'VIP']]],
-        ]]);
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getCreated());
     }
 
     public function testSkipsExistingGroup(): void
@@ -82,9 +88,28 @@ class CustomerGroupsTest extends TestCase
         $this->groupFactory->expects($this->never())->method('create');
         $this->groupRepository->expects($this->never())->method('save');
 
-        $this->component->execute(['customergroups' => [
+        $result = $this->execute([
             ['taxclass' => 'Retail Customer', 'groups' => [['name' => 'VIP']]],
-        ]]);
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(0, $result->getCreated());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testDryRunDoesNotPersist(): void
+    {
+        $this->givenTaxClassExists(3);
+        $this->givenGroupCount(0);
+        $this->groupFactory->method('create')->willReturn($this->createMock(GroupInterface::class));
+
+        $this->groupRepository->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            ['taxclass' => 'Retail Customer', 'groups' => [['name' => 'VIP']]],
+        ], true);
+
+        $this->assertSame(1, $result->getCreated());
     }
 
     public function testSkipsAllGroupsWhenTaxClassMissing(): void
@@ -92,11 +117,13 @@ class CustomerGroupsTest extends TestCase
         $this->givenTaxClassMissing();
 
         $this->groupRepository->expects($this->never())->method('save');
-        $this->log->expects($this->atLeastOnce())->method('logError');
 
-        $this->component->execute(['customergroups' => [
+        $result = $this->execute([
             ['taxclass' => 'Does Not Exist', 'groups' => [['name' => 'VIP']]],
-        ]]);
+        ]);
+
+        $this->assertFalse($result->isSuccessful());
+        $this->assertNotEmpty($result->getErrors());
     }
 
     public function testRejectsMissingAndOverlongNames(): void
@@ -107,23 +134,38 @@ class CustomerGroupsTest extends TestCase
 
         // Missing name + 33-char name are both rejected; the valid one is still saved.
         $this->groupRepository->expects($this->once())->method('save');
-        $this->log->expects($this->atLeast(2))->method('logError');
 
-        $this->component->execute(['customergroups' => [
+        $result = $this->execute([
             ['taxclass' => 'Retail Customer', 'groups' => [
                 ['nope' => 'no name key'],
                 ['name' => str_repeat('a', 33)],
                 ['name' => 'Valid'],
             ]],
-        ]]);
+        ]);
+
+        $this->assertSame(1, $result->getCreated());
+        $this->assertGreaterThanOrEqual(2, count($result->getErrors()));
     }
 
-    public function testLogsErrorWhenNodeMissing(): void
+    public function testRecordsErrorWhenNodeMissing(): void
     {
-        $this->log->expects($this->once())->method('logError');
         $this->groupRepository->expects($this->never())->method('save');
 
-        $this->component->execute(['something_else' => []]);
+        $result = $this->execute([], false, ['something_else' => []]);
+
+        $this->assertFalse($result->isSuccessful());
+    }
+
+    /**
+     * @param array $customerGroups value of the `customergroups` node
+     * @param array|null $rawData full source override (bypasses $customerGroups)
+     */
+    private function execute(array $customerGroups, bool $dryRun = false, ?array $rawData = null): ComponentResult
+    {
+        $data = $rawData ?? ['customergroups' => $customerGroups];
+        $context = new ComponentContext('test.yaml', ComponentMode::Create, 'test', $dryRun, static fn (): array => $data);
+
+        return $this->component->execute($context);
     }
 
     private function givenTaxClassExists(int $classId): void

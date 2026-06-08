@@ -10,6 +10,8 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Model\ComponentContext;
+use Magebit\Configurator\Model\ComponentResult;
 use Magebit\Configurator\Component\CatalogPriceRules\CatalogPriceRulesProcessor;
 use Magento\CatalogRule\Api\Data\RuleInterfaceFactory;
 
@@ -61,14 +63,19 @@ class CatalogPriceRules implements ComponentInterface
      *
      * @return void
      */
-    public function execute($data = null)
+    public function execute(ComponentContext $context): ComponentResult
     {
+        $result = new ComponentResult();
+        $data = $context->getData();
+
         $rules = $data['rules'] ?: [];
         $config = $data['config'] ?: [];
 
         $this->processor->setData($rules)
             ->setConfig($config)
             ->process();
+
+        return $result;
     }
 
     /**
