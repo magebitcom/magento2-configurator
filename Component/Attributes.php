@@ -106,6 +106,11 @@ class Attributes implements ComponentInterface
     protected $swatchMap = [];
 
     /**
+     * @var array
+     */
+    protected $optionCollection = [];
+
+    /**
      * Attributes constructor.
      * @param EavSetup $eavSetup
      * @param AttributeRepositoryInterface $attributeRepository
