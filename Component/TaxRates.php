@@ -2,13 +2,13 @@
 
 namespace CtiDigital\Configurator\Component;
 
-use CtiDigital\Configurator\Api\FileComponentInterface;
+use CtiDigital\Configurator\Api\ComponentInterface;
 use CtiDigital\Configurator\Api\LoggerInterface;
 use CtiDigital\Configurator\Exception\ComponentException;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\TaxImportExport\Model\Rate\CsvImportHandler;
 
-class TaxRates implements FileComponentInterface
+class TaxRates implements ComponentInterface
 {
     protected $alias = 'taxrates';
     protected $name = 'Tax Rates';
@@ -44,18 +44,84 @@ class TaxRates implements FileComponentInterface
     public function execute($data = null)
     {
         try {
-            $filePath =  BP . '/' . $data;
-            $this->log->logInfo(
-                sprintf('"%s" is being imported', $filePath)
-            );
+            // Sort data into the column order importExport requires
+            $sortedData = $this->getSortedData($data);
 
-            $this->csvImportHandler->importFromCsvFile(['tmp_name' => $filePath]);
-            $this->log->logInfo(
-                sprintf('"%s" Tax Rules import finished', $filePath)
-            );
+            // Generate sorted csv file
+            $tmpFile = $this->getTmpFile($sortedData);
+
+            // Pass the temporary file name to the import handler
+            $this->csvImportHandler->importFromCsvFile(['tmp_name' => $tmpFile]);
+
+            // Remove the temporary file
+            // phpcs:ignore Magento2.Functions.DiscouragedFunction
+            unlink($tmpFile);
+
+            // We don't know how many were successfully imported so we can't log the
+            // number of records imported, but we can log that the import was successful.
+            $this->log->logInfo('Tax rates finished importing, check the rates in the admin panel.');
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
         }
+    }
+
+    /**
+     * Reorder each row into the fixed column order Magento's CsvImportHandler expects.
+     *
+     * @param array $data
+     * @return array
+     */
+    protected function getSortedData(array $data): array
+    {
+        $sortedData = [];
+
+        foreach ($data as $index => $rate) {
+            if ($index === 0) {
+                $sortedData[] = $rate;
+                continue; // Skip the header row
+            }
+
+            $relativeData = array_combine($data[0], $rate);
+
+            // Reorder the data to match the format the importer requires
+            $rateData = [
+                $relativeData['code'],
+                $relativeData['tax_country_id'],
+                $relativeData['tax_region_id'],
+                $relativeData['tax_postcode'],
+                $relativeData['rate'],
+                $relativeData['zip_is_range'],
+                $relativeData['zip_from'],
+                $relativeData['zip_to']
+            ];
+            $sortedData[] = $rateData;
+        }
+        return $sortedData;
+    }
+
+    /**
+     * Write the sorted data to a temporary CSV file and return its path.
+     *
+     * @param array $sortedData
+     * @return string
+     */
+    protected function getTmpFile(array $sortedData): string
+    {
+        // Define a temporary file name
+        $tmpFile = sys_get_temp_dir() . '/tax_rates_' . uniqid() . '.csv';
+
+        // Write the CSV data to the temporary file
+        // phpcs:ignore Magento2.Functions.DiscouragedFunction
+        $fileHandle = fopen($tmpFile, 'w');
+        foreach ($sortedData as $line) {
+            // phpcs:ignore Magento2.Functions.DiscouragedFunction
+            fputcsv($fileHandle, $line, escape: '');
+        }
+        // phpcs:ignore Magento2.Functions.DiscouragedFunction
+        fclose($fileHandle);
+
+        // Return the path to the temporary file
+        return $tmpFile;
     }
 
     /**
