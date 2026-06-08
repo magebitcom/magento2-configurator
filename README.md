@@ -1,128 +1,121 @@
-# Magento 2 Configurator (Magebit version)
+# Magento 2 Configurator — Magebit v2
 
-[![Build Status](https://travis-ci.org/ctidigital/magento2-configurator.svg?branch=develop)](https://travis-ci.org/ctidigital/magento2-configurator)
+Keep Magento persistently configured from version-controlled files. Define your
+store configuration (websites, attributes, categories, CMS, tax, customers, …)
+as YAML/CSV, commit it, and apply it to any environment with a single command.
 
+Originally created by [CTI Digital]; this is Magebit's **v2** line — a
+modernised, self-owned fork under the `Magebit\Configurator` namespace
+(`Magebit_Configurator`).
 
-A Magento module initially created by [CTI Digital] to create and maintain database variables using files. This module aims to bring the following benefits to a Magento developer's work flow:
+## Why
 
-  - Install Magento from scratch with important database based configuration ready.
-  - Share and collaborate configuration with other colleagues using your own versioning system.
-  - Keep versions of your configurations using your own versioning system.
-  - Split your configuration based on the environment you're developing on.
+- Stand up a store from scratch with its important DB-backed configuration ready.
+- Share and version configuration alongside your code.
+- Apply environment-specific configuration (local / stage / live).
+- Re-run safely: components are idempotent and a `--dry-run` previews changes.
 
-Adjustments by Magebit
-  - Create/Maintain mode functionality
-    - Currently support these components
-      - Category
-      - CMS Pages/Blocks
-      - Configuration
-  - Better templating system for CMS content to allow for phtml files
-  - Adds version control for Create mode (Usage info: https://github.com/magebitcom/magento2-configurator/wiki/Versioning)
-    - Currently supports these components
-      - CMS Pages/Blocks
+## Requirements
 
-If you're interested to find out more about the background of the configurator, watch this lightning talk by [Raj Chevli] at Mage Titans in Manchester on [YouTube].
+- **Magento Open Source / Adobe Commerce 2.4.7 – 2.4.9** (all currently non-EOL)
+- **PHP 8.1 – 8.5** (the union supported across those Magento versions)
+- `firegento/fastsimpleimport ^2.0`
 
-This is a work in progress and by no means for use with production environments (and probably not even development environments either just yet).
+## What's new in v2
 
-## Testing Locally For Development
-If you are contributing the module, please run the following commands to stand the best chance with Travis CI liking your code.
-These test include PHP Code Sniffer, PHP Mess Detector, PHP Copy and Paste Detector, PHP Unit
-```
-php vendor/bin/phpcs --standard=vendor/magento/magento-coding-standard/Magento2/ruleset.xml vendor/ctidigital/magento2-configurator/Model/ vendor/ctidigital/magento2-configurator/Console/ vendor/ctidigital/magento2-configurator/Test/ vendor/ctidigital/magento2-configurator/Api/ vendor/ctidigital/magento2-configurator/Component/ vendor/ctidigital/magento2-configurator/Exception/
-php vendor/bin/phpmd vendor/ctidigital/magento2-configurator/Model/,vendor/ctidigital/magento2-configurator/Console/,vendor/ctidigital/magento2-configurator/Test/,vendor/ctidigital/magento2-configurator/Api/,vendor/ctidigital/magento2-configurator/Component/,vendor/ctidigital/magento2-configurator/Exception/ text cleancode,codesize,controversial,design,naming,unusedcode
-php vendor/bin/phpcpd vendor/ctidigital/magento2-configurator/Model/ vendor/ctidigital/magento2-configurator/Console vendor/ctidigital/magento2-configurator/Test/ vendor/ctidigital/magento2-configurator/Api/ vendor/ctidigital/magento2-configurator/Component/ vendor/ctidigital/magento2-configurator/Exception/
-php vendor/bin/phpunit vendor/ctidigital/magento2-configurator/Test/Unit/
-```
+- **`Magebit\Configurator` namespace** / `Magebit_Configurator` module.
+- **Typed component contract** — `execute(ComponentContext): ComponentResult`
+  (replacing the untyped `execute($data)`); `strict_types`, promoted `readonly`
+  constructors throughout.
+- **`--dry-run`** — preview what each component would create/update/skip without
+  persisting anything (raw SQL, imports and saves are all guarded).
+- **Meaningful exit codes** — `configurator:run` returns non-zero when any
+  component reports an error, and prints a run summary
+  (`created N, updated N, skipped N, errors N`). A single failing component no
+  longer aborts the whole run.
+- **Documented config contract** — every component's source format is in
+  [`docs/schema/`](docs/schema/README.md).
 
-## Known issues
-- [Media copy error if destination folder does not exists](https://github.com/magebitcom/magento2-configurator/issues/14)
+## Getting started
 
-## Integration tests
-- Configure your [Magento integration test environment](http://devdocs.magento.com/guides/v2.0/test/integration/integration_test_setup.html).
-- Add the XML below to dev/tests/integration/phpunit.xml.dist
-
-````
-<testsuite name="magento2-configurator">
-    <directory>../../../vendor/ctidigital/magento2-configurator/Test/Integration</directory>
-</testsuite>
- ````
- 
-- You can run the tests from the correct place on the command line
-
-````
-/dev/tests/integration$ ../../../vendor/bin/phpunit --testsuite "magento2-configurator"
-````
-
-- You can also add the magento PHP developer tools to your path, so that you do not have to specify location of phpunit
-````
-export PATH=$PATH:/var/www/magento2/vendor/bin
-````
-## Unit tests 
-If you're developing a new component, please ensure you have your corresponding unit test which extends `ComponentAbstractTestCase` as that will test that your component has the required functions.
-Do also include sample files with your component that works 
-
-## Travis
-We also use Travis CI to automate part of the testing process (we are still looking to add more to this!).
-It tests the following:
-* CodeSniffer
-* MessDetector
-* Copy & Paste Detection
-* Unit Tests
-* Run Configurator (we aim to run it on these versions)
-    1) Latest 3 minor versions
-    2) Latest release candidate (allowed to fail)
-
-## Getting Started
-1. Create a `master.yaml` file in `<mage_root>/app/etc/`. (see `Samples/master.yaml`)
-2. Enable Modules `Magebit_Configurator`,`FireGento_FastSimpleImport`.
-3. Run `bin/magento configurator:run --env="<environment>"`
+1. Create `app/etc/master.yaml` (see [`Samples/master.yaml`](Samples/master.yaml)).
+   Source paths are resolved relative to the Magento base dir, e.g.
+   `app/etc/configurator/Attributes/attributes.yaml`.
+2. Enable the modules: `bin/magento module:enable Magebit_Configurator FireGento_FastSimpleImport`
+   then `bin/magento setup:upgrade`.
+3. Apply: `bin/magento configurator:run --env="<environment>"`
 
 ### Usage
 
-* Listing available components `bin/magento configurator:list`
-* Running individual components `bin/magento configurator:run --env="<environment>" --component="config"`
-* Extra logs `bin/magento configurator:run --env="<environment>" -v`
+```bash
+bin/magento configurator:list                                   # list components
+bin/magento configurator:run --env="local"                      # run all
+bin/magento configurator:run --env="local" --component="config" # run one (repeatable)
+bin/magento configurator:run --env="local" --dry-run            # preview, no writes
+bin/magento configurator:run --env="local" -i                   # ignore missing source files
+bin/magento configurator:run --env="local" -v                   # verbose logging
+```
 
-## Roadmap for components to do
+## Configuration reference
 
-| Component                 | Code Written       | Tests Written      | Sample Files       |
-|---------------------------|--------------------|--------------------|--------------------|
-| Websites                  | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| System Configuration      | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Categories                | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Products                  | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Attributes                | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Attribute Sets            | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Blocks                    | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Admin Roles               | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Admin Users               | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Pages                     | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Widgets                   | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Customer Groups           | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Media                     | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Tax Rules                 | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| API Integrations          | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Tax Rates                 | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Rewrites                  | :white_check_mark: | :white_check_mark: | :white_check_mark: |
-| Review Ratings            | :white_check_mark: | :white_check_mark: | :white_check_mark: |
-| Related Products          | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Up Sell Products          | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Cross Sell Products       | :white_check_mark: | :grey_exclamation: | :white_check_mark: |
-| Customers                 | :white_check_mark: | :white_check_mark: | :white_check_mark: |
-| SQL                       | :white_check_mark: | :white_check_mark: | :white_check_mark: |
-| Catalog Price Rules       | :white_check_mark: | :x:                | :white_check_mark: |
-| Shipping Table Rates      | :white_check_mark: | :white_check_mark: | :white_check_mark: |
-| Customer Attributes       | :white_check_mark: | :x:                | :white_check_mark: |
-| Shopping Cart Price Rules | :x:                | :x:                | :x:                |
-| Orders                    | :x:                | :x:                | :x:                |
-| Tiered Prices             | :x:                | :x:                | :x:                |
+See [`docs/schema/`](docs/schema/README.md) for the source format of every
+component (fields, behaviour, create/maintain semantics). This is the stable
+public contract for the v2 line.
 
-License
-----
+## Testing
 
-MIT
+- **Unit tests** (`phpunit.xml.dist`) — run from within a Magento install:
+  ```bash
+  ../../../vendor/bin/phpunit -c phpunit.xml.dist
+  ```
+- **Conformance harness** ([`Test/Conformance/`](Test/Conformance/README.md)) —
+  runs every component through the shipped `Samples/` in `--dry-run` against a
+  real Magento and fails on any component crash. This is the primary integration
+  check.
+- **Static analysis** — `phpcs` (Magento2 standard, see `phpcs.xml.dist`) + `phpmd`.
 
+## Components
+
+All components are implemented and execute-verified on Magento 2.4.7. Each links
+to its schema page.
+
+| Component | Alias | Notes |
+|-----------|-------|-------|
+| Websites / Stores / Store Views | `websites` | |
+| Configuration | `config` | create/maintain |
+| Sequence | `sequence` | |
+| Attributes | `attributes` | create/maintain, swatches |
+| Attribute Sets | `attribute_sets` | |
+| Categories | `categories` | create/maintain |
+| Products | `products` | FastSimpleImport; configurable import has a [known issue](Test/Conformance/README.md#known-issue) |
+| Blocks | `blocks` | create/maintain, phtml templates, versioning |
+| Pages | `pages` | create/maintain, versioning |
+| API Integrations | `apiintegrations` | |
+| Tax Rates | `taxrates` | |
+| Tax Rules | `taxrules` | |
+| Widgets | `widgets` | |
+| Customer Groups | `customergroups` | |
+| Admin Roles / Users | `adminroles` / `adminusers` | |
+| Media | `media` | |
+| Rewrites | `rewrites` | |
+| Review Ratings | `review_rating` | |
+| Product Links | `product_links` | related / up-sell / cross-sell |
+| Customer Attributes | `customer_attributes` | |
+| Customers | `customers` | FastSimpleImport |
+| SQL | `sql` | raw SQL files |
+| Catalog Price Rules | `catalog_price_rules` | |
+| Shipping Table Rates | `shippingtablerates` | |
+| Order Statuses | `order_statuses` | |
+| Tiered Prices | `tiered_prices` | FastSimpleImport |
+
+## Background
+
+Lightning talk by [Raj Chevli] at Mage Titans Manchester on [YouTube].
+
+## License
+
+MIT — see [`LICENSE`](LICENSE). Copyright © 2016 CTI Digital; portions
+copyright © 2026 Magebit, Ltd.
 
 [CTI Digital]:http://www.ctidigital.com/
 [YouTube]:https://www.youtube.com/watch?v=iFkhAzJl2k0
