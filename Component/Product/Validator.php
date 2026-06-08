@@ -131,7 +131,9 @@ class Validator
     {
         $failedRows = [];
         // Creates a validation model and runs the import data through so we can find which rows would fail
-        $validation = $import->createImportModel();
+        // FastSimpleImport >=2.x exposes the import model via getImportModel()
+        // (the older createImportModel() was removed).
+        $validation = $import->getImportModel();
         $validationSource = $this->importAdapterFactory->create([
             'data' => $importLines,
             'multipleValueSeparator' => Products::SEPARATOR
