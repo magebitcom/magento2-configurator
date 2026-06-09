@@ -54,6 +54,8 @@
                 <item name="customer_attributes" xsi:type="object">Magebit\Configurator\Component\CustomerAttributes</item>
                 <item name="tiered_prices" xsi:type="object">Magebit\Configurator\Component\TieredPrices</item>
                 <item name="order_statuses" xsi:type="object">Magebit\Configurator\Component\OrderStatuses</item>
+                <item name="hyva_pages" xsi:type="object">Magebit\Configurator\Component\HyvaPages</item>
+                <item name="hyva_blocks" xsi:type="object">Magebit\Configurator\Component\HyvaBlocks</item>
             </argument>
         </arguments>
     </type>
