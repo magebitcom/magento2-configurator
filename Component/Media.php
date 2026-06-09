@@ -16,6 +16,9 @@ use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
 use Magento\Framework\App\Filesystem\DirectoryList;
+use Magento\MediaGalleryApi\Api\GetAssetsByPathsInterface;
+use Magento\MediaGalleryApi\Api\SaveAssetsInterface;
+use Magento\MediaGallerySynchronizationApi\Model\CreateAssetFromFileInterface;
 
 class Media implements ComponentInterface
 {
@@ -26,7 +29,10 @@ class Media implements ComponentInterface
 
     public function __construct(
         private readonly DirectoryList $directoryList,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly CreateAssetFromFileInterface $createAssetFromFile,
+        private readonly SaveAssetsInterface $saveAssets,
+        private readonly GetAssetsByPathsInterface $getAssetsByPaths
     ) {
     }
 
@@ -160,7 +166,42 @@ class Media implements ComponentInterface
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
         file_put_contents($path, $fileContents);
         $this->log->logInfo(sprintf('Created new file: %s', $path), $nest);
+        $this->registerMediaGalleryAsset($path, $nest);
         $result->recordCreated();
+    }
+
+    /**
+     * Register WYSIWYG media in the media gallery so it shows in the admin gallery UI.
+     *
+     * Only wysiwyg assets are registered (matching how the admin gallery indexes them).
+     * Failures are logged but never abort the run.
+     */
+    private function registerMediaGalleryAsset(string $path, int $nest): void
+    {
+        if (!str_contains($path, DIRECTORY_SEPARATOR . 'wysiwyg' . DIRECTORY_SEPARATOR)) {
+            return;
+        }
+
+        try {
+            $mediaPath = $this->directoryList->getPath(DirectoryList::MEDIA);
+            $relativePath = str_replace($mediaPath . DIRECTORY_SEPARATOR, '', $path);
+            $relativePath = str_replace('\\', '/', $relativePath);
+            $normalizedPath = '/' . $relativePath;
+
+            // Skip if the asset is already registered.
+            if ($this->getAssetsByPaths->execute([$normalizedPath]) !== []) {
+                return;
+            }
+
+            $asset = $this->createAssetFromFile->execute($relativePath);
+            $this->saveAssets->execute([$asset]);
+            $this->log->logInfo(sprintf('Registered media asset: %s', $relativePath), $nest);
+        } catch (\Exception $e) {
+            $this->log->logError(
+                sprintf('Failed to register media asset %s: %s', $path, $e->getMessage()),
+                $nest
+            );
+        }
     }
 
     public function getAlias(): string

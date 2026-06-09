@@ -72,6 +72,11 @@ class Widgets implements ComponentInterface
     public function processWidget(array $widgetData, bool $dryRun, ComponentResult $result): void
     {
         try {
+            // Capture the configured stores so block references resolve in the right scope.
+            $stores = (isset($widgetData['stores']) && is_array($widgetData['stores']))
+                ? $widgetData['stores']
+                : null;
+
             $widget = $this->findWidgetByInstanceTypeAndTitle($widgetData['instance_type'], $widgetData['title']);
 
             $isNew = false;
@@ -95,7 +100,7 @@ class Widgets implements ComponentInterface
 
                 if ($key == "parameters") {
                     $key = "widget_parameters";
-                    $value = $this->populateWidgetParameters($value);
+                    $value = $this->populateWidgetParameters($value, $stores);
                 }
 
                 if ($key == "theme") {
@@ -226,12 +231,13 @@ class Widgets implements ComponentInterface
 
     /**
      * @param array $parameters
+     * @param array|null $stores Store codes the widget is assigned to, used to scope block lookups.
      * @todo better support with parameters that reference IDs of objects
      */
-    public function populateWidgetParameters(array $parameters): string
+    public function populateWidgetParameters(array $parameters, ?array $stores = null): string
     {
         // Process block_identifier if present
-        $processedParameters = $this->processBlockIdentifiers($parameters);
+        $processedParameters = $this->processBlockIdentifiers($parameters, $stores);
 
         // Default property return
         return $this->serializer->serialize($processedParameters);
@@ -247,15 +253,22 @@ class Widgets implements ComponentInterface
      * -    block_identifier: <block_identifier> # e.g. venta-contact-us-faq
      * ```
      * @param array $parameters
+     * @param array|null $stores Store codes used to scope the block lookup.
      */
-    private function processBlockIdentifiers(array $parameters): array
+    private function processBlockIdentifiers(array $parameters, ?array $stores = null): array
     {
         $processedParameters = $parameters;
+
+        // Convert store codes to IDs once so block lookups can be scoped.
+        $storeIds = null;
+        if ($stores) {
+            $storeIds = explode(',', $this->getCommaSeparatedStoreIds($stores));
+        }
 
         foreach ($parameters as $key => $value) {
             if ($key === 'block_identifier' && is_string($value)) {
                 try {
-                    $blockId = $this->getBlockIdByIdentifier($value);
+                    $blockId = $this->getBlockIdByIdentifier($value, $storeIds);
                     // Replace block_identifier with block_id for the widget
                     unset($processedParameters['block_identifier']);
                     $processedParameters['block_id'] = $blockId;
@@ -280,14 +293,26 @@ class Widgets implements ComponentInterface
      * Get CMS block ID by identifier
      *
      * @param string $identifier
+     * @param array|null $storeIds Store IDs to scope the lookup; the first is used when provided.
      * @throws ComponentException
      */
-    private function getBlockIdByIdentifier($identifier): string
+    private function getBlockIdByIdentifier($identifier, ?array $storeIds = null): string
     {
         try {
-            $searchCriteria = $this->criteriaBuilder
-                ->addFilter('identifier', $identifier)
-                ->create();
+            $this->criteriaBuilder->addFilter('identifier', $identifier);
+
+            // Scope the lookup to the widget's store so the correct block is matched
+            // when the same identifier exists in multiple stores.
+            if (!empty($storeIds)) {
+                $firstStoreId = reset($storeIds);
+                $this->criteriaBuilder->addFilter('store_id', $firstStoreId, 'in');
+                $this->log->logInfo(
+                    sprintf('Looking for block "%s" in store ID: %s', $identifier, $firstStoreId),
+                    1
+                );
+            }
+
+            $searchCriteria = $this->criteriaBuilder->create();
 
             $blocks = $this->blockRepository->getList($searchCriteria);
 
