@@ -129,10 +129,12 @@ class OrderStatuses implements ComponentInterface, ExportableComponentInterface
 
     /**
      * Export current order statuses into the source format. Refresh mode rewrites
-     * only the status codes already tracked in the source file (refreshing their
-     * name from the DB and preserving state grouping and non-value keys such as
-     * version); full mode dumps every status grouped by its assigned state,
-     * optionally limited to codes that start with the given filter.
+     * the status codes already tracked in the source file to their full current
+     * state from the DB (refreshing each status's name and re-resolving its state
+     * assignment, regrouping it under the new state when the admin moved it, while
+     * preserving non-value keys such as version); full mode dumps every status
+     * grouped by its assigned state, optionally limited to codes that start with
+     * the given filter.
      */
     public function export(ExportContext $context): array
     {
@@ -176,9 +178,14 @@ class OrderStatuses implements ComponentInterface, ExportableComponentInterface
     }
 
     /**
-     * Walk the tracked source structure and refresh each tracked status's name
-     * from the DB, preserving state grouping and any non-value keys (version).
-     * Tracked statuses whose record no longer exists in the DB are kept untouched.
+     * Refresh each tracked status to its FULL current state from the DB: every
+     * field a status carries in this component's source format — its `name`
+     * (the only value field) and its `state` assignment (the relation grouping
+     * it under a parent state) — is re-resolved live, so an admin moving a status
+     * to another state or relabelling it is captured rather than silently lost.
+     * Non-DB structural keys present on a tracked entry (e.g. version) are
+     * preserved. Tracked statuses whose record no longer exists in the DB, and
+     * any non-value keys on the state set, are kept untouched.
      *
      * @param array $existing
      * @return array
@@ -208,12 +215,79 @@ class OrderStatuses implements ComponentInterface, ExportableComponentInterface
                     continue;
                 }
 
+                // Refresh the only value field; preserve structural keys (version).
                 $statusEntry['name'] = $statusMap[$code]['name'];
                 $out['order_statuses'][$setIndex]['statuses'][$statusIndex] = $statusEntry;
+
+                // Re-resolve the state relation: if the admin reassigned this
+                // status to a different state, move it under that state's set so
+                // the refreshed file reflects the live grouping. Fall back to the
+                // tracked state when the DB row carries no state assignment.
+                $dbState = $statusMap[$code]['state'];
+                $trackedState = isset($statusSet['state']) ? (string) $statusSet['state'] : null;
+                if ($dbState !== null && $dbState !== '' && $dbState !== $trackedState) {
+                    unset($out['order_statuses'][$setIndex]['statuses'][$statusIndex]);
+                    $out = $this->moveStatusToState($out, $dbState, $statusEntry);
+                }
             }
         }
 
+        $out['order_statuses'] = $this->pruneEmptyStatusSets($out['order_statuses']);
+
         return $out;
+    }
+
+    /**
+     * Place a refreshed status entry under the set for $state within the tracked
+     * structure, reusing an existing tracked set for that state when present or
+     * appending a new one otherwise. Returns the mutated order_statuses payload.
+     *
+     * @param array $out
+     * @param string $state
+     * @param array $statusEntry
+     * @return array
+     */
+    private function moveStatusToState(array $out, string $state, array $statusEntry): array
+    {
+        foreach ($out['order_statuses'] as $index => $set) {
+            if (is_array($set) && isset($set['state']) && (string) $set['state'] === $state) {
+                $out['order_statuses'][$index]['statuses'][] = $statusEntry;
+                return $out;
+            }
+        }
+
+        $out['order_statuses'][] = ['state' => $state, 'statuses' => [$statusEntry]];
+
+        return $out;
+    }
+
+    /**
+     * Drop state sets left with no statuses (and re-key the statuses arrays) after
+     * statuses have been moved between states during a refresh, keeping the file
+     * clean. Sets that are not well-formed are left untouched.
+     *
+     * @param array $sets
+     * @return array
+     */
+    private function pruneEmptyStatusSets(array $sets): array
+    {
+        $out = [];
+        foreach ($sets as $set) {
+            if (!is_array($set) || !isset($set['statuses']) || !is_array($set['statuses'])) {
+                $out[] = $set;
+                continue;
+            }
+
+            $statuses = array_values($set['statuses']);
+            if ($statuses === []) {
+                continue;
+            }
+
+            $set['statuses'] = $statuses;
+            $out[] = $set;
+        }
+
+        return array_values($out);
     }
 
     /**

@@ -324,7 +324,7 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
     {
         return $context->isFullExport()
             ? $this->exportAll($context->getFilter())
-            : $this->refreshTracked($context->getExistingData());
+            : $this->refreshTracked($context->getExistingData(), $context->isDryRun());
     }
 
     /**
@@ -335,7 +335,7 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
      * @param array $existing
      * @return array
      */
-    private function refreshTracked(array $existing): array
+    private function refreshTracked(array $existing, bool $dryRun): array
     {
         $out = [];
         foreach ($existing as $identifier => $blockData) {
@@ -347,7 +347,7 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
             $definitions = [];
             foreach ($blockData['block'] as $definition) {
                 $definitions[] = is_array($definition)
-                    ? $this->refreshDefinition((string) $identifier, $definition)
+                    ? $this->refreshDefinition((string) $identifier, $definition, $dryRun)
                     : $definition;
             }
 
@@ -362,13 +362,15 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
     /**
      * Refresh a single block definition's DB-backed values, preserving any other
      * keys (version, source, stores). When the entry uses a `source` template the
-     * `content` is left to the template file and not overwritten from the DB.
+     * current DB content is written into that file (created if missing) rather
+     * than inlined into the YAML.
      *
      * @param string $identifier
      * @param array $definition
+     * @param bool $dryRun
      * @return array
      */
-    private function refreshDefinition(string $identifier, array $definition): array
+    private function refreshDefinition(string $identifier, array $definition, bool $dryRun): array
     {
         $stores = (isset($definition['stores']) && is_array($definition['stores'])) ? $definition['stores'] : [];
         $block = $this->loadBlock($identifier, $stores);
@@ -376,13 +378,59 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
             return $definition;
         }
 
-        $definition['title'] = $block->getTitle();
-        $definition['is_active'] = (int) $block->getIsActive();
-        if (!isset($definition['source'])) {
-            $definition['content'] = $block->getContent();
+        $usesSource = isset($definition['source']) && (string) $definition['source'] !== '';
+        if ($usesSource) {
+            $this->writeSourceContent((string) $definition['source'], (string) $block->getContent(), $dryRun);
         }
 
-        return $definition;
+        // A tracked block exports everything about it from the DB.
+        $entry = [
+            'title' => $block->getTitle(),
+            'is_active' => (int) $block->getIsActive(),
+        ];
+        if (!$usesSource) {
+            $entry['content'] = $block->getContent();
+        }
+
+        // Preserve the tracked entry's non-DB keys (source, version, …).
+        foreach ($definition as $key => $value) {
+            if (in_array($key, ['title', 'is_active', 'content', 'stores'], true)) {
+                continue;
+            }
+            $entry[$key] = $value;
+        }
+
+        // Re-resolve store assignment from the DB so admin store changes are captured.
+        $codes = $this->resolveStoreCodes($block->getStoreId());
+        if ($codes !== []) {
+            $entry['stores'] = $codes;
+        }
+
+        return $entry;
+    }
+
+    /**
+     * Write content into a `source` file (path relative to the Magento base dir),
+     * creating the directory/file if needed. No-op (logged) during a dry run.
+     */
+    private function writeSourceContent(string $source, string $content, bool $dryRun): void
+    {
+        $path = BP . '/' . ltrim($source, '/');
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would write source content to %s', $path));
+            return;
+        }
+
+        $dir = dirname($path);
+        // phpcs:ignore Magento2.Functions.DiscouragedFunction
+        if (!is_dir($dir)) {
+            // phpcs:ignore Magento2.Functions.DiscouragedFunction
+            mkdir($dir, 0755, true);
+        }
+        // phpcs:ignore Magento2.Functions.DiscouragedFunction
+        file_put_contents($path, $content);
+        $this->log->logInfo(sprintf('Wrote source content to %s', $path));
     }
 
     /**

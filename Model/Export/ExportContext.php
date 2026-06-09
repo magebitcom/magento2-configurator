@@ -21,11 +21,13 @@ class ExportContext
      * @param array $existingData Parsed contents of the source file being refreshed (empty for a full export).
      * @param bool $full True when the caller wants everything in scope, not just tracked entries.
      * @param string|null $filter Optional prefix/key filter (component-specific; e.g. a config path prefix).
+     * @param bool $dryRun When true, components must not write any side files (e.g. `source` content files).
      */
     public function __construct(
         private readonly array $existingData = [],
         private readonly bool $full = false,
-        private readonly ?string $filter = null
+        private readonly ?string $filter = null,
+        private readonly bool $dryRun = false
     ) {
     }
 
@@ -42,5 +44,10 @@ class ExportContext
     public function getFilter(): ?string
     {
         return $this->filter;
+    }
+
+    public function isDryRun(): bool
+    {
+        return $this->dryRun;
     }
 }

@@ -92,14 +92,21 @@ class SyncFromDbCommand extends Command
         foreach ($result['skipped'] as $alias) {
             $output->writeln(sprintf('<comment>skipped %s (not exportable / no sources)</comment>', $alias));
         }
+        foreach ($result['errors'] ?? [] as $error) {
+            $output->writeln(sprintf('<error>%s</error>', $error));
+        }
 
+        $errorCount = count($result['errors'] ?? []);
         $output->writeln(sprintf(
-            '<info>Sync finished: %d file(s) %s, %d component(s) skipped.</info>',
+            '<info>Sync finished: %d file(s) %s, %d component(s) skipped, %d error(s).</info>',
             count($result['written']),
             $dryRun ? 'to write' : 'written',
-            count($result['skipped'])
+            count($result['skipped']),
+            $errorCount
         ));
 
-        return Command::SUCCESS;
+        // A failed component is logged and skipped (the rest still run), but the
+        // command still exits non-zero so CI/deploys notice.
+        return $errorCount > 0 ? Command::FAILURE : Command::SUCCESS;
     }
 }

@@ -42,6 +42,22 @@ class HyvaPages implements ComponentInterface, ExportableComponentInterface
     private const HYVA_MODULE = 'Hyva_CmsMagento';
     private const TABLE = 'hyva_commerce_cms_page';
 
+    /**
+     * Value-bearing source keys rebuilt from the DB on refresh (inline content
+     * variants, their `*_source` external-file references, and the liveview flag).
+     * Everything else in a tracked entry is a non-DB structural key (version,
+     * create_version_history, version_name, …) and is preserved verbatim.
+     */
+    private const DB_KEYS = [
+        'content',
+        'content_source',
+        'draft_content',
+        'draft_content_source',
+        'published_content',
+        'published_content_source',
+        'is_liveview_enabled',
+    ];
+
     public function __construct(
         private readonly CmsPageFactory $cmsPageFactory,
         private readonly ResourceConnection $resourceConnection,
@@ -318,10 +334,14 @@ class HyvaPages implements ComponentInterface, ExportableComponentInterface
     }
 
     /**
-     * Refresh each tracked identifier's content/liveview flag from the DB,
-     * preserving any non-value keys (version, create_version_history, …). Tracked
-     * identifiers that no longer resolve to a CMS page (or have no Hyvä row) are
-     * kept untouched. Identifiers not matching the filter are kept untouched.
+     * Refresh each tracked identifier by emitting its FULL current state from the
+     * DB (content + is_liveview_enabled), reusing the same row-to-entry builder as
+     * the full export so an admin change to a previously-untracked field (e.g. the
+     * liveview flag) is captured rather than silently dropped. Non-DB structural
+     * keys (version, create_version_history, version_name, version_emoji) and any
+     * `*_source` external-file references are preserved from the tracked entry.
+     * Tracked identifiers that no longer resolve to a CMS page (or have no Hyvä
+     * row), and identifiers not matching the filter, are kept untouched.
      *
      * @param array $existing
      * @param string|null $filter
@@ -351,44 +371,57 @@ class HyvaPages implements ComponentInterface, ExportableComponentInterface
                 continue;
             }
 
-            $out[$id] = $this->applyRowToEntry($entry, $row);
+            $out[$id] = $this->buildEntryFromRow($entry, $row);
         }
 
         return $out;
     }
 
     /**
-     * Update the value-bearing keys of an existing tracked entry from a DB row,
-     * preserving its content shape (shared `content`/`content_source` vs separate
-     * draft/published variants) and any non-value keys (version, version_name, …).
+     * Build a tracked entry's FULL current state from a Hyvä DB row.
+     *
+     * The DB-backed content and liveview flag are rebuilt from scratch via the same
+     * shaping the full export uses (draft == published collapses to a single inline
+     * `content`, otherwise separate `draft_content`/`published_content`). When the
+     * tracked entry sources its content from external files (`*_source` keys), those
+     * references are preserved and the corresponding inline content key is NOT
+     * emitted (we cannot rewrite the external file from here). Non-DB structural
+     * keys (version, create_version_history, …) are preserved from the entry.
      *
      * @param array<string, mixed> $entry
      * @param array<string, mixed> $row
      * @return array<string, mixed>
      */
-    private function applyRowToEntry(array $entry, array $row): array
+    private function buildEntryFromRow(array $entry, array $row): array
     {
-        $draft = (string) ($row['draft_content'] ?? '');
-        $published = (string) ($row['published_content'] ?? '');
+        $full = $this->shapeRow($row);
 
-        // *_source keys reference external files we cannot rewrite here, so they are
-        // preserved untouched; only inline content keys and the liveview flag are refreshed.
-        if (array_key_exists('content', $entry)) {
-            // Shared inline content maps to both draft and published; prefer published.
-            $entry['content'] = $published;
-        }
-        if (array_key_exists('draft_content', $entry)) {
-            $entry['draft_content'] = $draft;
-        }
-        if (array_key_exists('published_content', $entry)) {
-            $entry['published_content'] = $published;
-        }
-
-        if (array_key_exists('is_liveview_enabled', $entry)) {
-            $entry['is_liveview_enabled'] = (bool) (int) ($row['is_liveview_enabled'] ?? 0);
+        // External-file content references cannot be rewritten here: keep the
+        // `*_source` key and drop the inline content the full shaping would emit.
+        if (array_key_exists('content_source', $entry)) {
+            unset($full['content'], $full['draft_content'], $full['published_content']);
+            $full['content_source'] = $entry['content_source'];
+        } else {
+            if (array_key_exists('draft_content_source', $entry)) {
+                unset($full['content'], $full['draft_content']);
+                $full['draft_content_source'] = $entry['draft_content_source'];
+            }
+            if (array_key_exists('published_content_source', $entry)) {
+                unset($full['content'], $full['published_content']);
+                $full['published_content_source'] = $entry['published_content_source'];
+            }
         }
 
-        return $entry;
+        // Preserve non-DB structural keys (version, create_version_history,
+        // version_name, version_emoji, …) carried by the tracked entry.
+        foreach ($entry as $key => $value) {
+            if (in_array($key, self::DB_KEYS, true)) {
+                continue;
+            }
+            $full[$key] = $value;
+        }
+
+        return $full;
     }
 
     /**
@@ -415,23 +448,36 @@ class HyvaPages implements ComponentInterface, ExportableComponentInterface
 
         $out = [];
         foreach ($connection->fetchAll($select) as $row) {
-            $identifier = (string) $row['identifier'];
-            $draft = (string) ($row['draft_content'] ?? '');
-            $published = (string) ($row['published_content'] ?? '');
-
-            $entry = ['is_liveview_enabled' => (bool) (int) ($row['is_liveview_enabled'] ?? 0)];
-
-            if ($draft === $published) {
-                $entry['content'] = $published;
-            } else {
-                $entry['draft_content'] = $draft;
-                $entry['published_content'] = $published;
-            }
-
-            $out[$identifier] = $entry;
+            $out[(string) $row['identifier']] = $this->shapeRow($row);
         }
 
         return $out;
+    }
+
+    /**
+     * Shape a single Hyvä DB row into a source-format entry: the liveview flag plus
+     * either a shared inline `content` (when draft == published) or separate
+     * `draft_content`/`published_content`. Shared by full export and refresh so both
+     * emit the same full field set for a given row.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function shapeRow(array $row): array
+    {
+        $draft = (string) ($row['draft_content'] ?? '');
+        $published = (string) ($row['published_content'] ?? '');
+
+        $entry = ['is_liveview_enabled' => (bool) (int) ($row['is_liveview_enabled'] ?? 0)];
+
+        if ($draft === $published) {
+            $entry['content'] = $published;
+        } else {
+            $entry['draft_content'] = $draft;
+            $entry['published_content'] = $published;
+        }
+
+        return $entry;
     }
 
     public function getAlias(): string

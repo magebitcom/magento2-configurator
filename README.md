@@ -95,9 +95,14 @@ bin/magento configurator:sync-from-db --component=config --all --path="web/" --o
 
 - Default mode refreshes only the entries already present in the source files
   (low-noise); `--all` dumps everything in scope, `--path=` filters by prefix.
+- For `pages`/`blocks` entries that reference an external `source:` file, the
+  current DB content is written **into that file** (created if missing), not
+  inlined into the YAML — so template-sourced content round-trips.
 - Encrypted config values are never written out, so secrets stay out of git.
 - Only values actually stored in `core_config_data` are pulled (defaults from
   `config.xml`/`env.php` are left as-is).
+- A component that fails to export is logged and skipped; the rest still run and
+  the command exits non-zero.
 
 ## Reconciliation: modes & versioning
 
