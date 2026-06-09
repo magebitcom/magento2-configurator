@@ -149,6 +149,7 @@ versioning levers** described above — the notes below only call out extras.
 | Catalog Price Rules | `catalog_price_rules` | |
 | Shipping Table Rates | `shippingtablerates` | gate via component-level `version:` (no per-row reconcile) |
 | Order Statuses | `order_statuses` | |
+| Inventory Sources | `inventory_sources` | MSI sources/stocks/links + sales channels; run before `products` |
 | Hyvä CMS Pages | `hyva_pages` | optional — requires `Hyva_CmsMagento` (paid); no-ops without it |
 | Hyvä CMS Blocks | `hyva_blocks` | optional — requires `Hyva_CmsMagento` (paid); can auto-create the CMS block |
 | Tiered Prices | `tiered_prices` | FastSimpleImport |

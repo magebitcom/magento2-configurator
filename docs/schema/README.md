@@ -56,5 +56,6 @@ in `master.yaml` order.
 | Shipping Table Rates | `shippingtablerates` | YAML | [shippingtablerates.md](shippingtablerates.md) |
 | Order Statuses | `order_statuses` | YAML | [order_statuses.md](order_statuses.md) |
 | Tiered Prices | `tiered_prices` | CSV | [tiered_prices.md](tiered_prices.md) |
+| Inventory Sources | `inventory_sources` | YAML | [inventory_sources.md](inventory_sources.md) |
 | Hyvä CMS Pages | `hyva_pages` | YAML | [hyva_pages.md](hyva_pages.md) |
 | Hyvä CMS Blocks | `hyva_blocks` | YAML | [hyva_blocks.md](hyva_blocks.md) |
