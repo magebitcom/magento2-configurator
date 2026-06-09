@@ -44,6 +44,7 @@ below have special handling or meaning in the component.
 | `image`, `small_image`, `thumbnail`, `media_image`, `additional_images` | no | string | Image columns. Values are run through the image handler (downloads/copies and rewrites the value); multiple images use `;`. |
 | `qty` | no | number | Stock quantity. If `is_in_stock` is set without `qty`, `qty` defaults to `1`. |
 | `is_in_stock` | no | int | `1`/`0`. If both `qty` and `is_in_stock` are absent, default stock is applied. |
+| `msi_sources` | no | string | Multi-source-inventory source items: `source_code=qty[:status]` entries joined by `;` (e.g. `default=100;warehouse_b=50:0`); status `1`=in stock (default), `0`=out. Applied via the Inventory API after import for the imported SKUs; the column is stripped before FastSimpleImport. |
 | `associated_products` | configurable only | list | Comma-separated child SKUs. Used to build `configurable_variations`; dropped from the final row. |
 | `configurable_attributes` | configurable only | list | Comma-separated attribute codes that vary across the children (e.g. `color`). Used to build `configurable_variations`; dropped from the final row. |
 | `color` (and other attribute columns) | no | mixed | Any other header maps directly to that product attribute. Select/multiselect option labels are auto-created via the attribute-option handler. |

@@ -38,6 +38,7 @@
                 <item name="categories" xsi:type="object">Magebit\Configurator\Component\Categories</item>
                 <item name="taxrates" xsi:type="object">Magebit\Configurator\Component\TaxRates</item>
                 <item name="taxrules" xsi:type="object">Magebit\Configurator\Component\TaxRules</item>
+                <item name="inventory_sources" xsi:type="object">Magebit\Configurator\Component\InventorySources</item>
                 <item name="products" xsi:type="object">Magebit\Configurator\Component\Products</item>
                 <item name="blocks" xsi:type="object">Magebit\Configurator\Component\Blocks</item>
                 <item name="pages" xsi:type="object">Magebit\Configurator\Component\Pages</item>
@@ -54,6 +55,8 @@
                 <item name="customer_attributes" xsi:type="object">Magebit\Configurator\Component\CustomerAttributes</item>
                 <item name="tiered_prices" xsi:type="object">Magebit\Configurator\Component\TieredPrices</item>
                 <item name="order_statuses" xsi:type="object">Magebit\Configurator\Component\OrderStatuses</item>
+                <item name="hyva_pages" xsi:type="object">Magebit\Configurator\Component\HyvaPages</item>
+                <item name="hyva_blocks" xsi:type="object">Magebit\Configurator\Component\HyvaBlocks</item>
             </argument>
         </arguments>
     </type>

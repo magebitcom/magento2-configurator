@@ -42,6 +42,7 @@ which are transformed (see below). This means other native widget columns (e.g.
 | `[].stores` | no | list | Store-view **codes**; resolved to a comma-separated `store_ids`. Unknown store code throws and aborts the run. |
 | `[].parameters` | no | map | Widget parameters; serialized into `widget_parameters`. See block identifier note below. |
 | `[].parameters.block_identifier` | no | string | Convenience: a CMS block identifier that is resolved to its `block_id` (the `block_identifier` key is removed). Unknown identifier throws. |
+| `[].page_groups` | no | list | Layout placement. Each item: `page_group` (e.g. `all_pages`, `pages`, `anchor_categories`, `all_products`), `block` (block reference, e.g. `content`), plus optional `layout_handle` (default `default`), `for` (`all`/`1`), `template`, `page_id`, `entities`. Transformed into Magento's native `page_groups` structure and persisted by the resource save. |
 | `[].<other>` | no | mixed | Any other key is set directly on the widget instance (`setData`). |
 
 ## Behaviour
