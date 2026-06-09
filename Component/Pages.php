@@ -45,6 +45,9 @@ class Pages implements ComponentInterface, ExportableComponentInterface
     private const ALIAS = 'pages';
     private const DESCRIPTION = 'Component to create/maintain pages.';
 
+    /** Where a full export writes page content files referenced via `source:`. */
+    private const EXPORT_CONTENT_DIR = 'app/etc/configurator/Pages/content';
+
     /**
      * CMS page fields written back to source on export, in source-file order.
      * `content` is the rendered output of a `source` template on import, so when an
@@ -433,7 +436,7 @@ class Pages implements ComponentInterface, ExportableComponentInterface
     public function export(ExportContext $context): array
     {
         return $context->isFullExport()
-            ? $this->exportAll($context->getFilter())
+            ? $this->exportAll($context->getFilter(), $context->isDryRun())
             : $this->refreshTracked($context->getExistingData(), $context->getFilter(), $context->isDryRun());
     }
 
@@ -583,7 +586,7 @@ class Pages implements ComponentInterface, ExportableComponentInterface
      * @param string|null $filter
      * @return array
      */
-    private function exportAll(?string $filter): array
+    private function exportAll(?string $filter, bool $dryRun): array
     {
         $connection = $this->resourceConnection->getConnection();
         $cmsPageTable = $connection->getTableName('cms_page');
@@ -610,8 +613,17 @@ class Pages implements ComponentInterface, ExportableComponentInterface
 
             $entry = [];
             foreach (self::EXPORT_FIELDS as $field) {
+                // Content is written to an external .html file and referenced via
+                // `source:`, never inlined into the YAML.
+                if ($field === 'content') {
+                    continue;
+                }
                 $entry[$field] = $page->getData($field);
             }
+
+            $source = self::EXPORT_CONTENT_DIR . '/' . $identifier . '.html';
+            $this->writeSourceContent($source, (string) $page->getData('content'), $dryRun);
+            $entry['source'] = $source;
 
             $stores = $this->resolveStoreCodes($pageId);
             if ($stores !== []) {

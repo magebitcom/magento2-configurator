@@ -36,6 +36,9 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
     private const ALIAS = 'blocks';
     private const DESCRIPTION = 'Component to create/maintain blocks.';
 
+    /** Where a full export writes block content files referenced via `source:`. */
+    private const EXPORT_CONTENT_DIR = 'app/etc/configurator/Blocks/content';
+
     protected $viewModelRegistry = null;
 
     public function __construct(
@@ -362,7 +365,7 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
     public function export(ExportContext $context): array
     {
         return $context->isFullExport()
-            ? $this->exportAll($context->getFilter())
+            ? $this->exportAll($context->getFilter(), $context->isDryRun())
             : $this->refreshTracked($context->getExistingData(), $context->isDryRun());
     }
 
@@ -480,7 +483,7 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
      * @param string|null $filter
      * @return array
      */
-    private function exportAll(?string $filter): array
+    private function exportAll(?string $filter, bool $dryRun): array
     {
         $collection = $this->blockFactory->create()->getCollection();
         if ($filter !== null && $filter !== '') {
@@ -490,9 +493,15 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
         $out = [];
         foreach ($collection as $block) {
             $identifier = (string) $block->getIdentifier();
+
+            // Content is written to an external .html file and referenced via
+            // `source:`, never inlined into the YAML.
+            $source = self::EXPORT_CONTENT_DIR . '/' . $identifier . '.html';
+            $this->writeSourceContent($source, (string) $block->getContent(), $dryRun);
+
             $definition = [
                 'title' => $block->getTitle(),
-                'content' => $block->getContent(),
+                'source' => $source,
                 'is_active' => (int) $block->getIsActive(),
             ];
 

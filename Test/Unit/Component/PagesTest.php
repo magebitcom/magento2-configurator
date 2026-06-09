@@ -292,13 +292,16 @@ class PagesTest extends TestCase
         });
         $this->pageRepository->method('getById')->with(42)->willReturn($page);
 
-        $out = $this->component->export(new ExportContext([], true));
+        // Full export + dry-run: content goes to an external `source:` .html file
+        // (not inlined); dry-run keeps the filesystem untouched.
+        $out = $this->component->export(new ExportContext([], true, null, true));
 
         $this->assertArrayHasKey('about-us', $out);
         $entry = $out['about-us']['page'][0];
         $this->assertSame('About Us', $entry['title']);
         $this->assertSame('Welcome', $entry['content_heading']);
-        $this->assertSame('<p>Hi</p>', $entry['content']);
+        $this->assertSame('app/etc/configurator/Pages/content/about-us.html', $entry['source']);
+        $this->assertArrayNotHasKey('content', $entry);
         $this->assertSame('1column', $entry['page_layout']);
         $this->assertArrayNotHasKey('stores', $entry);
     }

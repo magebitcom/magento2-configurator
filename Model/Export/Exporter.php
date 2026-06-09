@@ -29,6 +29,9 @@ class Exporter
     private const YAML_INLINE_DEPTH = 6;
     private const YAML_INDENT = 2;
 
+    /** Aliases whose source files are CSV, used when deriving a default target path. */
+    private const CSV_ALIASES = ['rewrites', 'taxrates', 'taxrules', 'customers', 'products', 'tiered_prices'];
+
     public function __construct(
         private readonly ComponentListInterface $componentList,
         private readonly LoggerInterface $log
@@ -42,7 +45,17 @@ class Exporter
     public function export(array $aliases, bool $full, ?string $filter, ?string $output, bool $dryRun): array
     {
         $master = $this->readMaster();
-        $targets = $aliases !== [] ? $aliases : array_keys($master);
+
+        if ($aliases !== []) {
+            $targets = $aliases;
+        } elseif ($full) {
+            // Full export with no explicit components: every exportable component,
+            // independent of master.yaml wiring (the point of --all is "dump the DB").
+            $targets = array_keys($this->exportableComponents());
+        } else {
+            // Refresh with no explicit components: only what master.yaml already tracks.
+            $targets = array_keys($master);
+        }
 
         $written = [];
         $skipped = [];
@@ -56,7 +69,12 @@ class Exporter
                 continue;
             }
 
-            if (!isset($master[$alias]['sources']) || $master[$alias]['sources'] === []) {
+            $sources = isset($master[$alias]['sources']) ? (array) $master[$alias]['sources'] : [];
+
+            // Refresh needs existing source files to rewrite; a full export can always
+            // produce output (an explicit --output, the first master source, or a
+            // conventional default path), so it is never skipped for lack of sources.
+            if (!$full && $sources === []) {
                 $this->log->logError(sprintf("No sources defined for '%s' in master.yaml; skipping.", $alias));
                 $skipped[] = $alias;
                 continue;
@@ -64,7 +82,7 @@ class Exporter
 
             // Resilience: a single component failing must not abort the whole run.
             try {
-                foreach ($this->exportComponent($component, (array) $master[$alias]['sources'], $full, $filter, $output, $dryRun) as $path) {
+                foreach ($this->exportComponent($component, $sources, $alias, $full, $filter, $output, $dryRun) as $path) {
                     $written[] = $path;
                 }
             } catch (\Throwable $t) {
@@ -92,14 +110,17 @@ class Exporter
     private function exportComponent(
         ExportableComponentInterface $component,
         array $sources,
+        string $alias,
         bool $full,
         ?string $filter,
         ?string $output,
         bool $dryRun
     ): array {
         if ($full) {
-            // One pass: write the full export to an explicit target or the first source.
-            $target = $output ?? $this->resolvePath((string) $sources[0]);
+            // One pass to: an explicit --output, else the first master source, else a
+            // conventional default path so an unwired component still exports.
+            $target = $output
+                ?? (isset($sources[0]) ? $this->resolvePath((string) $sources[0]) : $this->defaultTarget($alias));
             $data = $component->export(new ExportContext([], true, $filter, $dryRun));
             $this->writeFile($target, $data, $dryRun);
             return [$target];
@@ -138,6 +159,31 @@ class Exporter
     private function resolvePath(string $source): string
     {
         return BP . '/' . ltrim($source, '/');
+    }
+
+    /**
+     * Exportable components keyed by alias.
+     *
+     * @return array<string, ExportableComponentInterface>
+     */
+    private function exportableComponents(): array
+    {
+        return array_filter(
+            $this->componentList->getAllComponents(),
+            static fn ($component) => $component instanceof ExportableComponentInterface
+        );
+    }
+
+    /**
+     * Conventional source path for a full export of a component that has no source
+     * wired in master.yaml: app/etc/configurator/<StudlyFolder>/<alias>.<ext>.
+     */
+    private function defaultTarget(string $alias): string
+    {
+        $folder = str_replace(' ', '', ucwords(str_replace('_', ' ', $alias)));
+        $ext = in_array($alias, self::CSV_ALIASES, true) ? 'csv' : 'yaml';
+
+        return BP . '/app/etc/configurator/' . $folder . '/' . $alias . '.' . $ext;
     }
 
     /**

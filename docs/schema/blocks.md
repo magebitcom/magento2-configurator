@@ -66,6 +66,11 @@ can call escaping helpers and Hyvä view models. A plain HTML file such as
 - **Versioning.** When `version` is set it is compared against the stored version
   (keyed by `blocks_<identifier>` plus the store codes). Only a higher version is
   treated as a new version; after a successful apply the new version is recorded.
+- **Sync from DB.** `configurator:sync-from-db --component=blocks --all` exports every
+  block: each block's content is written to an external file under
+  `app/etc/configurator/Blocks/content/<identifier>.html` and the YAML entry references
+  it via `source:` (never inlined as `content:`). When the component isn't wired in
+  `master.yaml`, the export still runs and defaults to `app/etc/configurator/Blocks/blocks.yaml`.
 - **Removal.** `remove: true` on a definition deletes the matching block via the
   block repository, in either mode, and records it as *removed* in the run summary.
   A block that does not exist is recorded as *skipped* (no error), so the entry is
