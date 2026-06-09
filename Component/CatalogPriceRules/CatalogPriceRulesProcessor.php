@@ -14,8 +14,8 @@ use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\CatalogRule\Api\CatalogRuleRepositoryInterface;
-use Magento\CatalogRule\Api\Data\RuleInterfaceFactory;
 use Magento\CatalogRule\Model\Rule;
+use Magento\CatalogRule\Model\RuleFactory;
 use Magento\CatalogRule\Model\Rule\Job;
 
 /**
@@ -34,7 +34,7 @@ class CatalogPriceRulesProcessor implements ComponentProcessorInterface
     private $config = [];
 
     /**
-     * @var RuleInterfaceFactory
+     * @var RuleFactory
      */
     private $ruleFactory;
 
@@ -67,14 +67,14 @@ class CatalogPriceRulesProcessor implements ComponentProcessorInterface
      * CatalogPriceRules constructor.
      *
      * @param LoggerInterface $logger
-     * @param RuleInterfaceFactory $ruleFactory
+     * @param RuleFactory $ruleFactory
      * @param CatalogRuleRepositoryInterface $catalogRuleRepo
      * @param Job $ruleJob
      * @param ReconciliationGate $gate
      */
     public function __construct(
         LoggerInterface $logger,
-        RuleInterfaceFactory $ruleFactory,
+        RuleFactory $ruleFactory,
         CatalogRuleRepositoryInterface $catalogRuleRepo,
         Job $ruleJob,
         ReconciliationGate $gate

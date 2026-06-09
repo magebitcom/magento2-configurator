@@ -23,6 +23,7 @@ data row. The column **order is free**, but the column names below are matched e
 | `redirectType` | yes | int | `301` (permanent) or `302` (temporary). |
 | `storeId` | yes | int | Store-view id the rewrite applies to. Used together with `requestPath` to detect an existing rewrite. |
 | `description` | yes | string | Free-text label. Also used as the identifier in log / dry-run messages. |
+| `version` | no | int | Optional per-entity version. Bump it to force an update of an existing rewrite even in `create` mode (see the reconciliation table in the README). Omit the column entirely to opt out of versioning. |
 
 ## Behaviour
 
@@ -30,6 +31,10 @@ data row. The column **order is free**, but the column names below are matched e
   same request path and store id already exists, the existing record is loaded and
   re-saved (counted as *updated*, "already exists, rewrite updated"); otherwise a new one is
   created (counted as *created*).
+- **Versioning.** An existing rewrite that would otherwise be protected in `create` mode is
+  updated when its `version` column is higher than the last applied value; the new version is
+  recorded after a successful save. Without a `version` column, existing rewrites are left
+  untouched in `create` mode.
 - **Dry-run.** Logs `[dry-run] Would create/update URL Rewrite: "<description>"` and records
   the create/update without saving.
 - **Error cases.** If the file has no rows at all (`$data[0]` unset) the error

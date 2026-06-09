@@ -41,6 +41,7 @@ class Rewrites implements ComponentInterface, ExportableComponentInterface
     const TARGET_PATH_CSV_KEY = 'targetPath';
     const REDIRECT_TYPE_CSV_KEY = 'redirectType';
     const DESCRIPTION_CSV_KEY = 'description';
+    const VERSION_CSV_KEY = 'version';
 
     public function __construct(
         private readonly UrlPersistInterface $urlPersist,
@@ -152,11 +153,16 @@ class Rewrites implements ComponentInterface, ExportableComponentInterface
             ->addFieldToFilter('store_id', $rewriteArray[self::STORE_ID_CSV_KEY])
             ->getSize();
 
+        $version = isset($rewriteArray[self::VERSION_CSV_KEY]) && $rewriteArray[self::VERSION_CSV_KEY] !== ''
+            ? (int) $rewriteArray[self::VERSION_CSV_KEY]
+            : null;
+
         $request = new ReconciliationRequest(
             self::ALIAS,
             $rewriteArray[self::REQUEST_PATH_CSV_KEY] . '_' . $rewriteArray[self::STORE_ID_CSV_KEY],
             $mode,
-            $rewriteCount > 0
+            $rewriteCount > 0,
+            $version
         );
 
         if ($this->gate->decide($request)->isSkip()) {
@@ -186,6 +192,7 @@ class Rewrites implements ComponentInterface, ExportableComponentInterface
                 )
             );
             $isUpdate ? $result->recordUpdated() : $result->recordCreated();
+            $this->gate->commitVersion($request, true);
             return;
         }
 
@@ -202,6 +209,7 @@ class Rewrites implements ComponentInterface, ExportableComponentInterface
         );
 
         $isUpdate ? $result->recordUpdated() : $result->recordCreated();
+        $this->gate->commitVersion($request, false);
     }
 
     /**

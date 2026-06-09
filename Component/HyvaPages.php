@@ -260,9 +260,10 @@ class HyvaPages implements ComponentInterface, ExportableComponentInterface
         $connection = $this->resourceConnection->getConnection();
         $table = $this->resourceConnection->getTableName(self::TABLE);
         $liveview = $isLiveview ? 1 : 0;
+        $now = new \Zend_Db_Expr('NOW()');
 
         if ($existing !== false) {
-            $bind = ['is_liveview_enabled' => $liveview, 'update_time' => $connection->getDateFunction()];
+            $bind = ['is_liveview_enabled' => $liveview, 'update_time' => $now];
             if ($content['draft'] !== null) {
                 $bind['draft_content'] = $content['draft'];
             }
@@ -278,8 +279,8 @@ class HyvaPages implements ComponentInterface, ExportableComponentInterface
             'is_liveview_enabled' => $liveview,
             'draft_content' => $content['draft'] ?? '',
             'published_content' => $content['published'] ?? '',
-            'creation_time' => $connection->getDateFunction(),
-            'update_time' => $connection->getDateFunction(),
+            'creation_time' => $now,
+            'update_time' => $now,
         ]);
     }
 
