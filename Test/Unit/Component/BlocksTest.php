@@ -29,6 +29,12 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Filesystem\Filesystem;
 
+// The component references the global BP base-dir constant when writing `source:`
+// content files; define a stub so path resolution does not fatal under unit tests.
+if (!defined('BP')) {
+    define('BP', sys_get_temp_dir());
+}
+
 class BlocksTest extends TestCase
 {
     private BlockInterfaceFactory&MockObject $blockFactory;
@@ -219,7 +225,7 @@ class BlocksTest extends TestCase
         $this->assertSame(0, $result->getSkipped());
     }
 
-    public function testExportAllDumpsEveryBlockInline(): void
+    public function testExportAllWritesContentToSourceFile(): void
     {
         $block = $this->getMockBuilder(Block::class)
             ->disableOriginalConstructor()
@@ -235,14 +241,17 @@ class BlocksTest extends TestCase
         $collection = $this->givenIterableCollection([$block]);
         $this->blockFactory->method('create')->willReturn($this->givenCollectionSource($collection));
 
-        $out = $this->component->export(new ExportContext([], true));
+        // Full export + dry-run: content is referenced via `source:` (written to an
+        // external .html file), never inlined; dry-run keeps the filesystem untouched.
+        $out = $this->component->export(new ExportContext([], true, null, true));
 
         $this->assertArrayHasKey('footer-links', $out);
         $this->assertSame([
             'title' => 'Footer Links',
-            'content' => '<p>links</p>',
+            'source' => 'app/etc/configurator/Blocks/content/footer-links.html',
             'is_active' => 1,
         ], $out['footer-links']['block'][0]);
+        $this->assertArrayNotHasKey('content', $out['footer-links']['block'][0]);
         $this->assertArrayNotHasKey('stores', $out['footer-links']['block'][0]);
     }
 

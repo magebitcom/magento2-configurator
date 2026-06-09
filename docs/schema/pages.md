@@ -73,6 +73,11 @@ becomes the page content.
   pages are created in both modes.
 - **Versioning.** Identical to blocks: only a higher `version` re-applies the page;
   the new version is recorded after a successful apply.
+- **Sync from DB.** `configurator:sync-from-db --component=pages --all` exports every
+  page: each page's content is written to an external file under
+  `app/etc/configurator/Pages/content/<identifier>.html` and the YAML entry references
+  it via `source:` (never inlined as `content:`). When the component isn't wired in
+  `master.yaml`, the export still runs and defaults to `app/etc/configurator/Pages/pages.yaml`.
 - **Removal.** `remove: true` on a definition deletes the matching page via the
   page repository, in either mode, and records it as *removed* in the run summary.
   A page that does not exist is recorded as *skipped* (no error). Dry-run logs

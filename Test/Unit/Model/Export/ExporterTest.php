@@ -182,45 +182,88 @@ class ExporterTest extends TestCase
         $this->assertSame([], $result['written']);
     }
 
-    public function testComponentWithoutSourcesIsSkipped(): void
+    public function testRefreshWithoutSourcesIsSkipped(): void
     {
-        // Listed in master.yaml but no sources defined -> skipped, error logged.
+        // Listed in master.yaml but no sources defined -> refresh has nothing to
+        // rewrite -> skipped, error logged. (A full export, by contrast, falls back
+        // to a default target; see the next test.)
         $this->givenMaster(['customergroups' => ['sources' => []]]);
         $component = $this->givenExportableComponent([]);
         $component->expects($this->never())->method('export');
 
         $this->log->expects($this->atLeastOnce())->method('logError');
 
-        $result = $this->exporter->export(['customergroups'], true, null, null, false);
+        $result = $this->exporter->export(['customergroups'], false, null, null, false);
 
         $this->assertSame(['customergroups'], $result['skipped']);
         $this->assertSame([], $result['written']);
     }
 
-    public function testEmptyAliasesExportsEveryComponentInMaster(): void
+    public function testFullExportFallsBackToDefaultTargetWhenUnwired(): void
+    {
+        // A component not wired in master.yaml still fully exports, to the
+        // conventional app/etc/configurator/<Folder>/<alias>.yaml path.
+        $this->givenMaster([]);
+        $component = $this->givenExportableComponent(['blocks' => []]);
+        $component->method('export')->willReturn(['blocks' => []]);
+
+        $expected = $this->trackPath('app/etc/configurator/Blocks/blocks.yaml');
+        $result = $this->exporter->export(['blocks'], true, null, null, false);
+
+        $this->assertSame([$expected], $result['written']);
+        $this->assertFileExists($expected);
+    }
+
+    public function testRefreshEmptyAliasesUsesMasterKeys(): void
     {
         $this->givenMaster([
             'customergroups' => ['sources' => ['app/etc/configurator/customergroups.yaml']],
             'plain' => ['sources' => ['app/etc/configurator/plain.yaml']],
         ]);
 
-        // Build the exportable component directly (not via the helper) so we don't
-        // register a blanket getComponent() stub that would shadow the map below.
         $exportable = $this->createMock(ExportableComponentStub::class);
         $exportable->method('export')->willReturn(['customergroups' => []]);
         $plain = $this->createMock(ComponentInterface::class);
 
-        // Aliases come from master.yaml keys when none are supplied.
+        // Refresh with no explicit aliases targets the master.yaml keys.
         $this->componentList->method('getComponent')->willReturnMap([
             ['customergroups', $exportable],
             ['plain', $plain],
         ]);
 
         $cgPath = $this->trackPath('app/etc/configurator/customergroups.yaml');
-        $result = $this->exporter->export([], true, null, null, false);
+        file_put_contents($cgPath, Yaml::dump(['customergroups' => []]));
+        $result = $this->exporter->export([], false, null, null, false);
 
         $this->assertSame([$cgPath], $result['written']);
         $this->assertSame(['plain'], $result['skipped']);
+    }
+
+    public function testFullEmptyAliasesExportsEveryExportableComponent(): void
+    {
+        // --all with no --component: every exportable component, independent of
+        // master.yaml wiring. 'blocks' has no master entry, so it lands on its
+        // default target; the non-exportable component is skipped.
+        $this->givenMaster([]);
+
+        $blocks = $this->createMock(ExportableComponentStub::class);
+        $blocks->method('export')->willReturn(['b' => []]);
+        $plain = $this->createMock(ComponentInterface::class);
+
+        $this->componentList->method('getAllComponents')->willReturn([
+            'blocks' => $blocks,
+            'plain' => $plain,
+        ]);
+        $this->componentList->method('getComponent')->willReturnMap([
+            ['blocks', $blocks],
+            ['plain', $plain],
+        ]);
+
+        $blocksPath = $this->trackPath('app/etc/configurator/Blocks/blocks.yaml');
+        $result = $this->exporter->export([], true, null, null, false);
+
+        // Only exportable components are enumerated, so 'plain' isn't even a target.
+        $this->assertSame([$blocksPath], $result['written']);
     }
 
     public function testComponentExportFailureIsIsolatedAndRecorded(): void
