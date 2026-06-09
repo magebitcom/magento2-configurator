@@ -156,6 +156,56 @@ class AttributesTest extends TestCase
         $this->assertSame(1, $result->getCreated());
     }
 
+    public function testRemoveDeletesExistingUserDefinedAttribute(): void
+    {
+        // Existing user-defined attribute -> removeAttribute called once, no save.
+        $this->givenExistingAttribute(['is_user_defined' => 1]);
+
+        $this->eavSetup->expects($this->once())
+            ->method('removeAttribute')
+            ->with('catalog_product', 'colour');
+        $this->eavSetup->expects($this->never())->method('addAttribute');
+
+        $result = $this->execute([
+            'colour' => ['remove' => true],
+        ]);
+
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getCreated());
+        $this->assertSame(0, $result->getUpdated());
+    }
+
+    public function testRemoveAbsentAttributeIsSkipped(): void
+    {
+        // No existing attribute -> nothing to remove, recorded as a skip.
+        $this->eavSetup->method('getAttribute')->willReturn(false);
+
+        $this->eavSetup->expects($this->never())->method('removeAttribute');
+        $this->eavSetup->expects($this->never())->method('addAttribute');
+
+        $result = $this->execute([
+            'colour' => ['remove' => true],
+        ]);
+
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testRemoveDryRunDoesNotDelete(): void
+    {
+        $this->givenExistingAttribute(['is_user_defined' => 1]);
+
+        $this->eavSetup->expects($this->never())->method('removeAttribute');
+        $this->eavSetup->expects($this->never())->method('addAttribute');
+
+        $result = $this->execute([
+            'colour' => ['remove' => true],
+        ], true);
+
+        // Intent is still recorded even though nothing is deleted.
+        $this->assertSame(1, $result->getRemoved());
+    }
+
     public function testRecordsErrorWhenAttributesNodeMissing(): void
     {
         $this->eavSetup->expects($this->never())->method('addAttribute');

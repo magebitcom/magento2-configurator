@@ -205,6 +205,51 @@ class ReviewRatingTest extends TestCase
         $this->assertSame(0, $result->getCreated());
     }
 
+    public function testRemovesExistingRating(): void
+    {
+        // Existing rating flagged for removal -> delete called once, no save.
+        $rating = $this->givenLoadedRating(42);
+
+        $this->ratingResource->expects($this->once())->method('delete')->with($rating);
+        $this->ratingResource->expects($this->never())->method('save');
+        $this->optionResource->expects($this->never())->method('save');
+
+        $result = $this->execute(['Quality' => ['remove' => true]]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getCreated());
+        $this->assertSame(0, $result->getUpdated());
+    }
+
+    public function testRemoveAbsentRatingIsSkipped(): void
+    {
+        // Rating not present -> nothing deleted, recorded as a skip (idempotent).
+        $this->givenLoadedRating(0);
+
+        $this->ratingResource->expects($this->never())->method('delete');
+        $this->ratingResource->expects($this->never())->method('save');
+
+        $result = $this->execute(['Quality' => ['remove' => true]]);
+
+        $this->assertSame(1, $result->getSkipped());
+        $this->assertSame(0, $result->getRemoved());
+    }
+
+    public function testDryRunDoesNotDeleteRating(): void
+    {
+        // Dry-run records the removal intent but deletes nothing.
+        $this->givenLoadedRating(42);
+
+        $this->ratingResource->expects($this->never())->method('delete');
+        $this->ratingResource->expects($this->never())->method('save');
+
+        $result = $this->execute(['Quality' => ['remove' => true]], true);
+
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertTrue($result->isSuccessful());
+    }
+
     public function testFullExportDumpsEveryProductRating(): void
     {
         $rating = $this->getMockBuilder(Rating::class)

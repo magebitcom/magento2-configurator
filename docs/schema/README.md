@@ -27,6 +27,27 @@ Each component is wired into `master.yaml`, which is the table of contents:
 The per-component pages below document the structure of the referenced source files,
 in `master.yaml` order.
 
+## Removing entities (`remove: true`)
+
+Configurator normally only creates/updates — removing an entry from a source file
+never deletes the entity. To **delete** an entity, set `remove: true` on its source
+entry (a `remove` column for CSV components). Removal:
+
+- applies in **both** `create` and `maintain` mode (it's an explicit instruction,
+  not subject to create-protect);
+- is **idempotent** — an entity already absent is recorded as *skipped*, not an error;
+- honours `--dry-run` (logs `[dry-run] Would remove …`, deletes nothing);
+- is counted in the run summary as `removed N`.
+
+Supported on the entity components: `config`, `blocks`, `pages`, `widgets`,
+`rewrites`, `categories` (deletes the subtree), `customergroups`, `adminroles`,
+`adminusers`, `apiintegrations`, `review_rating`, `taxrules`, `catalog_price_rules`,
+`order_statuses`, `attribute_sets`, `attributes`, `customer_attributes` (user-defined
+attributes only). **Not** supported on bulk/imperative or structural components
+(`products`, `customers`, `tiered_prices`, `taxrates`, `sql`, `sequence`, `media`,
+`websites`, `shippingtablerates`, `inventory_sources` — MSI forbids source deletion).
+See each component's page for its key and any guards.
+
 | Component | Alias | Source | Page |
 |-----------|-------|--------|------|
 | Websites / Stores / Store Views | `websites` | YAML | [websites.md](websites.md) |

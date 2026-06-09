@@ -60,6 +60,12 @@ class AdminRoles implements ComponentInterface, ExportableComponentInterface
                 if (!isset($role['name'])) {
                     throw new ComponentException((string) __('An adminroles entry is missing the "name" key.'));
                 }
+                // Explicit removal: `remove: true` deletes the role if it exists,
+                // in either mode. Idempotent — a role already absent is skipped.
+                if (!empty($role['remove'])) {
+                    $this->removeAdminRole($role['name'], $context->isDryRun(), $result);
+                    continue;
+                }
                 $this->createAdminRole(
                     $role['name'],
                     $role['resources'] ?? null,
@@ -132,6 +138,36 @@ class AdminRoles implements ComponentInterface, ExportableComponentInterface
         $this->setResourceIds($role, $resources, $dryRun);
         $this->gate->commitVersion($request, $dryRun);
         $result->recordCreated();
+    }
+
+    /**
+     * Delete an admin role flagged with `remove: true`. Idempotent: a role that
+     * is already absent records a skip rather than an error. Honors dry-run.
+     *
+     * @param string $roleName
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @return void
+     */
+    private function removeAdminRole(string $roleName, bool $dryRun, ComponentResult $result): void
+    {
+        $role = $this->roleFactory->create();
+        $existing = $role->getCollection()->addFieldToFilter('role_name', $roleName)->getFirstItem();
+
+        if (!$existing->getId()) {
+            $this->log->logComment(sprintf("Admin Role '%s' not present, nothing to remove", $roleName));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove Admin Role %s', $roleName));
+        } else {
+            $this->roleResource->delete($existing);
+            $this->log->logInfo(sprintf('Removed Admin Role %s', $roleName));
+        }
+
+        $result->recordRemoved();
     }
 
     /**

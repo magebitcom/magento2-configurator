@@ -403,6 +403,56 @@ class PagesTest extends TestCase
         $this->assertSame($existing['blog/post'], $out['blog/post']);
     }
 
+    public function testRemoveDeletesExistingPage(): void
+    {
+        // `remove: true` on an existing page deletes it (in either mode) and never
+        // loads/saves it through the create/update path.
+        $this->givenPageLookup(55);
+
+        $this->pageFactory->expects($this->never())->method('create');
+        $this->pageRepository->expects($this->never())->method('save');
+        $this->pageRepository->expects($this->once())->method('deleteById')->with(55);
+
+        $result = $this->execute([
+            'about-us' => ['page' => [['remove' => true]]],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getCreated());
+    }
+
+    public function testRemoveSkipsWhenPageAbsent(): void
+    {
+        // `remove: true` on a page that does not exist is idempotent: skip, no delete.
+        $this->givenPageLookup(false);
+
+        $this->pageRepository->expects($this->never())->method('deleteById');
+        $this->pageRepository->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            'about-us' => ['page' => [['remove' => true]]],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testRemoveDryRunDoesNotDelete(): void
+    {
+        // Dry-run records the removal intent but performs no delete.
+        $this->givenPageLookup(55);
+
+        $this->pageRepository->expects($this->never())->method('deleteById');
+
+        $result = $this->execute([
+            'about-us' => ['page' => [['remove' => true]]],
+        ], true);
+
+        $this->assertSame(1, $result->getRemoved());
+    }
+
     /**
      * @param array $pages source data keyed by identifier
      * @param array|null $rawData full source override (bypasses $pages)

@@ -69,7 +69,8 @@ class Attributes implements ComponentInterface, ExportableComponentInterface
      */
     protected $skipCheck = [
         'option',
-        'used_in_forms'
+        'used_in_forms',
+        'remove'
     ];
 
     /**
@@ -153,6 +154,16 @@ class Attributes implements ComponentInterface, ExportableComponentInterface
         $attributeArray = $this->eavSetup->getAttribute($this->entityTypeId, $attributeCode);
         if ($attributeArray && $attributeArray['attribute_id']) {
             $this->attributeExists = true;
+        }
+
+        // Explicit removal: `remove: true` deletes the attribute if it exists,
+        // in either mode. Idempotent — an attribute already absent is skipped.
+        if (!empty($attributeConfig['remove'])) {
+            $this->removeAttribute((string) $attributeCode, $attributeArray, $dryRun, $result);
+            return;
+        }
+
+        if ($this->attributeExists) {
             $this->log->logComment(sprintf('Attribute %s exists. Checking for updates.', $attributeCode));
             $this->updateAttribute = $this->checkForAttributeUpdates($attributeCode, $attributeArray, $attributeConfig);
 
@@ -181,8 +192,8 @@ class Attributes implements ComponentInterface, ExportableComponentInterface
             return;
         }
 
-        // Keep the version marker out of the EAV attribute config.
-        unset($attributeConfig['version']);
+        // Keep the version/remove markers out of the EAV attribute config.
+        unset($attributeConfig['version'], $attributeConfig['remove']);
 
         if (!array_key_exists('user_defined', $attributeConfig)) {
             $attributeConfig['user_defined'] = 1;
@@ -228,6 +239,46 @@ class Attributes implements ComponentInterface, ExportableComponentInterface
         $this->log->logInfo(sprintf('Attribute %s created.', $attributeCode));
         $this->gate->commitVersion($request, $dryRun);
         $result->recordCreated();
+    }
+
+    /**
+     * Delete an attribute flagged with `remove: true`. Idempotent: an attribute
+     * that is already absent records a skip rather than an error. Only
+     * user-defined attributes are removed; system attributes are protected.
+     * Honors dry-run.
+     *
+     * @param string $attributeCode
+     * @param array|false $attributeArray
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @return void
+     */
+    protected function removeAttribute(
+        string $attributeCode,
+        $attributeArray,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
+        if (!$attributeArray || empty($attributeArray['attribute_id'])) {
+            $this->log->logComment(sprintf("Attribute '%s' not present, nothing to remove", $attributeCode));
+            $result->recordSkipped();
+            return;
+        }
+
+        if (isset($attributeArray['is_user_defined']) && !$attributeArray['is_user_defined']) {
+            $this->log->logComment(sprintf("Attribute '%s' is a system attribute, skipping removal", $attributeCode));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove attribute %s', $attributeCode));
+        } else {
+            $this->eavSetup->removeAttribute($this->entityTypeId, $attributeCode);
+            $this->log->logInfo(sprintf('Removed attribute %s', $attributeCode));
+        }
+
+        $result->recordRemoved();
     }
 
     protected function checkForAttributeUpdates($attributeCode, $attributeArray, $attributeConfig)

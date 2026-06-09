@@ -171,6 +171,62 @@ class CustomerAttributesTest extends TestCase
         $this->assertSame(1, $result->getCreated());
     }
 
+    public function testRemoveDeletesExistingUserDefinedAttribute(): void
+    {
+        // User-defined attribute exists => removeAttribute is called once, nothing saved.
+        $this->givenAttributeExists(['frontend_input' => 'text', 'is_user_defined' => 1]);
+
+        $this->eavSetup->expects($this->once())
+            ->method('removeAttribute')
+            ->with('customer', 'my_attr');
+        $this->eavSetup->expects($this->never())->method('addAttribute');
+        $this->attributeResource->expects($this->never())->method('save');
+        $this->customerSetupFactory->expects($this->never())->method('create');
+
+        $result = $this->execute([
+            'my_attr' => ['remove' => true],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getCreated());
+    }
+
+    public function testRemoveAbsentAttributeIsSkipped(): void
+    {
+        // Attribute does not exist => no delete, recorded as a skip (idempotent).
+        $this->givenAttributeDoesNotExist();
+
+        $this->eavSetup->expects($this->never())->method('removeAttribute');
+        $this->eavSetup->expects($this->never())->method('addAttribute');
+        $this->attributeResource->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            'my_attr' => ['remove' => true],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testRemoveDryRunDoesNotDelete(): void
+    {
+        // Dry run records the removal intent but never touches EavSetup.
+        $this->givenAttributeExists(['frontend_input' => 'text', 'is_user_defined' => 1]);
+
+        $this->eavSetup->expects($this->never())->method('removeAttribute');
+        $this->eavSetup->expects($this->never())->method('addAttribute');
+        $this->attributeResource->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            'my_attr' => ['remove' => true],
+        ], true);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+    }
+
     public function testRecordsErrorWhenNodeMissing(): void
     {
         $this->eavSetup->expects($this->never())->method('addAttribute');

@@ -189,6 +189,55 @@ class CustomerGroupsTest extends TestCase
         $this->assertGreaterThanOrEqual(2, count($result->getErrors()));
     }
 
+    public function testRemovesExistingGroup(): void
+    {
+        $this->givenTaxClassExists(3);
+        $existing = $this->givenExistingGroup(3);
+        $existing->method('getId')->willReturn(5);
+
+        $this->groupRepository->expects($this->never())->method('save');
+        $this->groupRepository->expects($this->once())->method('deleteById')->with(5);
+
+        $result = $this->execute([
+            ['taxclass' => 'Retail Customer', 'groups' => [['name' => 'VIP', 'remove' => true]]],
+        ]);
+
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getSkipped());
+        $this->assertSame(0, $result->getCreated());
+    }
+
+    public function testRemoveAbsentGroupIsSkipped(): void
+    {
+        $this->givenTaxClassExists(3);
+        $this->givenNoExistingGroup();
+
+        $this->groupRepository->expects($this->never())->method('save');
+        $this->groupRepository->expects($this->never())->method('deleteById');
+
+        $result = $this->execute([
+            ['taxclass' => 'Retail Customer', 'groups' => [['name' => 'Gone', 'remove' => true]]],
+        ]);
+
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testDryRunRemoveDoesNotDelete(): void
+    {
+        $this->givenTaxClassExists(3);
+        $existing = $this->givenExistingGroup(3);
+        $existing->method('getId')->willReturn(5);
+
+        $this->groupRepository->expects($this->never())->method('deleteById');
+
+        $result = $this->execute([
+            ['taxclass' => 'Retail Customer', 'groups' => [['name' => 'VIP', 'remove' => true]]],
+        ], true);
+
+        $this->assertSame(1, $result->getRemoved());
+    }
+
     public function testRecordsErrorWhenNodeMissing(): void
     {
         $this->groupRepository->expects($this->never())->method('save');

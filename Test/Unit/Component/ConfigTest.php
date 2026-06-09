@@ -199,6 +199,64 @@ class ConfigTest extends TestCase
         $this->assertSame(1, $result->getCreated());
     }
 
+    public function testRemovesExistingGlobalConfigValue(): void
+    {
+        // An existing stored value -> delete it via the resource, no save.
+        $this->givenLookupCollection('Acme');
+
+        $this->configResource->expects($this->never())->method('saveConfig');
+        $this->configResource->expects($this->once())
+            ->method('deleteConfig')
+            ->with('general/store/name', ScopeConfigInterface::SCOPE_TYPE_DEFAULT, 0);
+
+        $result = $this->execute([
+            'global' => [
+                ['path' => 'general/store/name', 'remove' => true],
+            ],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getSkipped());
+    }
+
+    public function testRemoveAbsentGlobalConfigValueIsSkipped(): void
+    {
+        // No stored value for the path -> idempotent skip, nothing deleted.
+        $this->givenLookupCollection(false);
+
+        $this->configResource->expects($this->never())->method('saveConfig');
+        $this->configResource->expects($this->never())->method('deleteConfig');
+
+        $result = $this->execute([
+            'global' => [
+                ['path' => 'general/store/name', 'remove' => true],
+            ],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testDryRunRemoveDoesNotDeleteButRecordsRemoval(): void
+    {
+        // Existing value, dry-run -> nothing deleted but the removal intent is recorded.
+        $this->givenLookupCollection('Acme');
+
+        $this->configResource->expects($this->never())->method('saveConfig');
+        $this->configResource->expects($this->never())->method('deleteConfig');
+
+        $result = $this->execute([
+            'global' => [
+                ['path' => 'general/store/name', 'remove' => true],
+            ],
+        ], true);
+
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getSkipped());
+    }
+
     public function testRecordsErrorForUnknownScope(): void
     {
         $this->configResource->expects($this->never())->method('saveConfig');

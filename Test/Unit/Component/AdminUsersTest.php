@@ -191,6 +191,66 @@ class AdminUsersTest extends TestCase
         $this->assertSame(0, $result->getCreated());
     }
 
+    public function testRemoveDeletesExistingUser(): void
+    {
+        $this->givenRoleExists('Administrators', 1);
+
+        // An existing user (id 7) is looked up by email and deleted via the resource.
+        $existing = $this->givenNewUser(exists: true);
+
+        $this->userResource->expects($this->once())->method('delete')->with($existing);
+        $this->userResource->expects($this->never())->method('save');
+
+        $row = $this->userRow();
+        $row['remove'] = true;
+
+        $result = $this->execute([
+            ['rolename' => 'Administrators', 'users' => [$row]],
+        ]);
+
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getCreated());
+    }
+
+    public function testRemoveSkipsAbsentUser(): void
+    {
+        $this->givenRoleExists('Administrators', 1);
+        // No matching user in the DB -> nothing to delete, recorded as a skip.
+        $this->givenNewUser(exists: false);
+
+        $this->userResource->expects($this->never())->method('delete');
+        $this->userResource->expects($this->never())->method('save');
+
+        $row = $this->userRow();
+        $row['remove'] = true;
+
+        $result = $this->execute([
+            ['rolename' => 'Administrators', 'users' => [$row]],
+        ]);
+
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testRemoveDryRunDoesNotDelete(): void
+    {
+        $this->givenRoleExists('Administrators', 1);
+        $this->givenNewUser(exists: true);
+
+        $this->userResource->expects($this->never())->method('delete');
+        $this->userResource->expects($this->never())->method('save');
+
+        $row = $this->userRow();
+        $row['remove'] = true;
+
+        $result = $this->execute([
+            ['rolename' => 'Administrators', 'users' => [$row]],
+        ], true);
+
+        // Intent is still recorded even though nothing is deleted.
+        $this->assertSame(1, $result->getRemoved());
+    }
+
     public function testRecordsErrorWhenNodeMissing(): void
     {
         $this->userResource->expects($this->never())->method('save');

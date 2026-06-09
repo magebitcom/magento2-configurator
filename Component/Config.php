@@ -80,6 +80,21 @@ class Config implements ComponentInterface, ExportableComponentInterface
 
                 if ($scope == "global") {
                     foreach ($configurations as $configuration) {
+                        // Explicit removal: `remove: true` deletes the stored value in
+                        // either mode. Checked before validation so a removal entry
+                        // need not carry a value.
+                        if (!empty($configuration['remove'])) {
+                            $this->removeConfig(
+                                $configuration['path'],
+                                ScopeConfigInterface::SCOPE_TYPE_DEFAULT,
+                                0,
+                                $configuration['path'],
+                                $dryRun,
+                                $result
+                            );
+                            continue;
+                        }
+
                         // Handle encryption parameter
                         $encryption = 0;
                         if (isset($configuration['encryption']) && $configuration['encryption'] == 1) {
@@ -104,6 +119,29 @@ class Config implements ComponentInterface, ExportableComponentInterface
                 if ($scope == "websites") {
                     foreach ($configurations as $code => $websiteConfigurations) {
                         foreach ($websiteConfigurations as $configuration) {
+                            // Explicit removal: `remove: true` deletes the stored value.
+                            if (!empty($configuration['remove'])) {
+                                $scopeId = $this->resolveScopeId('websites', (string) $code);
+                                if ($scopeId === null) {
+                                    $this->log->logComment(
+                                        sprintf("There is no website with the code '%s', nothing to remove", $code),
+                                        1
+                                    );
+                                    $result->recordSkipped();
+                                    continue;
+                                }
+                                $this->removeConfig(
+                                    $configuration['path'],
+                                    'websites',
+                                    $scopeId,
+                                    sprintf("website '%s' %s", $code, $configuration['path']),
+                                    $dryRun,
+                                    $result,
+                                    1
+                                );
+                                continue;
+                            }
+
                             // Handle encryption parameter
                             $encryption = 0;
                             if (isset($configuration['encryption']) && $configuration['encryption'] == 1) {
@@ -129,6 +167,29 @@ class Config implements ComponentInterface, ExportableComponentInterface
                 if ($scope == "stores") {
                     foreach ($configurations as $code => $storeConfigurations) {
                         foreach ($storeConfigurations as $configuration) {
+                            // Explicit removal: `remove: true` deletes the stored value.
+                            if (!empty($configuration['remove'])) {
+                                $scopeId = $this->resolveScopeId('stores', (string) $code);
+                                if ($scopeId === null) {
+                                    $this->log->logComment(
+                                        sprintf("There is no store view with the code '%s', nothing to remove", $code),
+                                        2
+                                    );
+                                    $result->recordSkipped();
+                                    continue;
+                                }
+                                $this->removeConfig(
+                                    $configuration['path'],
+                                    'stores',
+                                    $scopeId,
+                                    sprintf("store '%s' %s", $code, $configuration['path']),
+                                    $dryRun,
+                                    $result,
+                                    2
+                                );
+                                continue;
+                            }
+
                             // Handle encryption parameter
                             $encryption = 0;
                             if (isset($configuration['encryption']) && $configuration['encryption'] == 1) {
@@ -381,6 +442,54 @@ class Config implements ComponentInterface, ExportableComponentInterface
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
             $result?->addError($e->getMessage());
+        }
+    }
+
+    /**
+     * Delete a config value flagged with `remove: true`. Idempotent: if no value is
+     * stored for the path+scope, records a skip rather than an error. Honors dry-run.
+     * Deletes through the same resource the component uses to save config.
+     *
+     * @param string $path
+     * @param string $scope
+     * @param int $scopeId
+     * @param string $label human-readable key used in log output
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @param int $logNest
+     * @return void
+     */
+    private function removeConfig(
+        string $path,
+        string $scope,
+        int $scopeId,
+        string $label,
+        bool $dryRun,
+        ComponentResult $result,
+        int $logNest = 0
+    ): void {
+        try {
+            $existingValue = $this->getSetConfigValue($path, $scope, $scopeId);
+            if ($existingValue === false) {
+                $this->log->logComment(
+                    sprintf("Config '%s' not present, nothing to remove", $label),
+                    $logNest
+                );
+                $result->recordSkipped();
+                return;
+            }
+
+            if ($dryRun) {
+                $this->log->logInfo(sprintf('[dry-run] Would remove config %s', $label), $logNest);
+            } else {
+                $this->configResource->deleteConfig($path, $scope, $scopeId);
+                $this->log->logInfo(sprintf('Removed config %s', $label), $logNest);
+            }
+
+            $result->recordRemoved();
+        } catch (ComponentException $e) {
+            $this->log->logError($e->getMessage());
+            $result->addError($e->getMessage());
         }
     }
 

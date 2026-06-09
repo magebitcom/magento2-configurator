@@ -216,6 +216,68 @@ class WidgetsTest extends TestCase
         $this->assertSame(1, $result->getCreated());
     }
 
+    public function testRemoveDeletesExistingWidget(): void
+    {
+        $existing = $this->givenExistingWidget('Magento\\Banner\\Block\\Widget\\Banner', 'Promo Banner');
+        $existing->method('getId')->willReturn(5);
+
+        // Removal deletes via the resource and never saves.
+        $existing->expects($this->never())->method('setData');
+        $this->widgetResource->expects($this->never())->method('save');
+        $this->widgetResource->expects($this->once())->method('delete')->with($existing);
+
+        $result = $this->execute([
+            [
+                'instance_type' => 'Magento\\Banner\\Block\\Widget\\Banner',
+                'title' => 'Promo Banner',
+                'remove' => true,
+            ],
+        ]);
+
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getCreated());
+        $this->assertSame(0, $result->getUpdated());
+    }
+
+    public function testRemoveAbsentWidgetIsSkipped(): void
+    {
+        // No matching widget in the collection.
+        $this->givenWidgetCollection([]);
+
+        $this->widgetResource->expects($this->never())->method('delete');
+        $this->widgetResource->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            [
+                'instance_type' => 'Magento\\Banner\\Block\\Widget\\Banner',
+                'title' => 'Promo Banner',
+                'remove' => true,
+            ],
+        ]);
+
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testRemoveDryRunDoesNotDelete(): void
+    {
+        $existing = $this->givenExistingWidget('Magento\\Banner\\Block\\Widget\\Banner', 'Promo Banner');
+        $existing->method('getId')->willReturn(5);
+
+        $this->widgetResource->expects($this->never())->method('delete');
+        $this->widgetResource->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            [
+                'instance_type' => 'Magento\\Banner\\Block\\Widget\\Banner',
+                'title' => 'Promo Banner',
+                'remove' => true,
+            ],
+        ], true);
+
+        $this->assertSame(1, $result->getRemoved());
+    }
+
     public function testRecordsErrorWhenDataEmpty(): void
     {
         $this->widgetResource->expects($this->never())->method('save');

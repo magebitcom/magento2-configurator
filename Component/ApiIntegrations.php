@@ -86,6 +86,18 @@ class ApiIntegrations implements ComponentInterface, ExportableComponentInterfac
             ->getFirstItem();
         $exists = (bool) $existing->getId();
 
+        // Explicit removal: `remove: true` deletes the integration if it exists,
+        // in either mode. Idempotent — an integration already absent is skipped.
+        if (!empty($integrationData['remove'])) {
+            $this->removeApiIntegration(
+                (string) $integrationData['name'],
+                $exists ? (int) $existing->getId() : false,
+                $dryRun,
+                $result
+            );
+            return;
+        }
+
         $version = $integrationData['version'] ?? null;
         $request = new ReconciliationRequest(
             self::ALIAS,
@@ -132,6 +144,38 @@ class ApiIntegrations implements ComponentInterface, ExportableComponentInterfac
 
         $this->gate->commitVersion($request, $dryRun);
         $outcome->record($result);
+    }
+
+    /**
+     * Delete an integration flagged with `remove: true`. Idempotent: an integration
+     * that is already absent records a skip rather than an error. Honors dry-run.
+     *
+     * @param string $name
+     * @param false|int $integrationId
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @return void
+     */
+    private function removeApiIntegration(
+        string $name,
+        false|int $integrationId,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
+        if (!$integrationId) {
+            $this->log->logComment(sprintf("API Integration '%s' not present, nothing to remove", $name));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove API Integration %s', $name));
+        } else {
+            $this->integrationService->delete($integrationId);
+            $this->log->logInfo(sprintf('Removed API Integration %s', $name));
+        }
+
+        $result->recordRemoved();
     }
 
     /**

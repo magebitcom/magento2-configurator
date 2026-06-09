@@ -158,14 +158,27 @@ class ComponentResultTest extends TestCase
         $this->result->recordCreated(1);
         $this->result->recordUpdated(2);
         $this->result->recordSkipped(3);
+        $this->result->recordRemoved(4);
         $this->result->addError('e1');
         $this->result->addError('e2');
 
-        $this->assertSame('created 1, updated 2, skipped 3, errors 2', $this->result->summary());
+        $this->assertSame('created 1, updated 2, skipped 3, removed 4, errors 2', $this->result->summary());
     }
 
     public function testSummaryOnFreshResultIsAllZeroes(): void
     {
-        $this->assertSame('created 0, updated 0, skipped 0, errors 0', $this->result->summary());
+        $this->assertSame('created 0, updated 0, skipped 0, removed 0, errors 0', $this->result->summary());
+    }
+
+    public function testRecordRemovedAndMergeAccumulate(): void
+    {
+        $this->result->recordRemoved();
+        $this->result->recordRemoved(2);
+        $this->assertSame(3, $this->result->getRemoved());
+
+        $other = new ComponentResult();
+        $other->recordRemoved(4);
+        $this->result->merge($other);
+        $this->assertSame(7, $this->result->getRemoved());
     }
 }

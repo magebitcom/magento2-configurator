@@ -98,6 +98,18 @@ class CustomerAttributes extends Attributes
 
         try {
             foreach ($data['customer_attributes'] as $attributeCode => $attributeConfiguration) {
+                // Explicit removal: `remove: true` deletes the attribute in either
+                // mode (bypassing the reconciliation gate). Determined before any
+                // create/update or required-field handling. Idempotent and dry-run aware.
+                if (!empty($attributeConfiguration['remove'])) {
+                    $this->removeCustomerAttribute(
+                        (string) $attributeCode,
+                        $context->isDryRun(),
+                        $result
+                    );
+                    continue;
+                }
+
                 $this->processAttribute(
                     $attributeCode,
                     $attributeConfiguration,
@@ -161,6 +173,40 @@ class CustomerAttributes extends Attributes
                 $e->getMessage()
             ));
         }
+    }
+
+    /**
+     * Delete a customer attribute flagged with `remove: true`. Idempotent: an
+     * attribute that is absent (or is not user-defined) records a skip rather than
+     * an error. Honors dry-run. Removal applies in both create and maintain mode.
+     *
+     * @param string $attributeCode
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @return void
+     */
+    protected function removeCustomerAttribute(string $attributeCode, bool $dryRun, ComponentResult $result): void
+    {
+        $attributeArray = $this->eavSetup->getAttribute($this->entityTypeId, $attributeCode);
+
+        // Only user-defined attributes may be removed; system attributes are left alone.
+        if (!$attributeArray || empty($attributeArray['attribute_id']) || empty($attributeArray['is_user_defined'])) {
+            $this->log->logComment(sprintf(
+                "Customer attribute '%s' not present (or not user-defined), nothing to remove",
+                $attributeCode
+            ));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove customer attribute %s', $attributeCode));
+        } else {
+            $this->eavSetup->removeAttribute($this->entityTypeId, $attributeCode);
+            $this->log->logInfo(sprintf('Removed customer attribute %s', $attributeCode));
+        }
+
+        $result->recordRemoved();
     }
 
     public function getAlias(): string

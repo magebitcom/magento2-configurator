@@ -51,6 +51,7 @@ inline_content_page:
 | `<identifier>.page[].content` | no | string | Inline page content. Use instead of `source`. |
 | `<identifier>.page[].stores` | no | list | Store **codes** the page applies to. Each is resolved via the store repository (unknown codes raise `NoSuchEntityException`, logged). When omitted the page is saved at default scope (store id 0). |
 | `<identifier>.page[].version` | no | int | Version number; the page is only re-applied when greater than the last recorded version (keyed by identifier + stores). Stripped before saving. |
+| `<identifier>.page[].remove` | no | bool | When truthy, **delete** the page (looked up by `identifier`, narrowed by store when `stores` is set) instead of creating/updating it. Applies in both `create` and `maintain` mode. Idempotent: a page already absent is recorded as skipped. All other fields on the entry are ignored when `remove` is set. |
 | `<identifier>.page[].meta_title`, `meta_keywords`, `meta_description`, `content_heading`, `sort_order`, `layout_update_xml`, `custom_theme`, `custom_root_template`, `custom_layout_update_xml`, `custom_theme_from`, `custom_theme_to` | no | mixed | Standard CMS page fields, set directly when their value differs from the current value. Empty YAML values are passed through as empty. |
 | `<identifier>.page[].<other>` | no | mixed | Any other key is set directly on the page via `setData()`. |
 
@@ -72,6 +73,10 @@ becomes the page content.
   pages are created in both modes.
 - **Versioning.** Identical to blocks: only a higher `version` re-applies the page;
   the new version is recorded after a successful apply.
+- **Removal.** `remove: true` on a definition deletes the matching page via the
+  page repository, in either mode, and records it as *removed* in the run summary.
+  A page that does not exist is recorded as *skipped* (no error). Dry-run logs
+  `[dry-run] Would remove page <identifier>` and deletes nothing.
 - **Dry-run.** Logs `[dry-run] Would create/save page <identifier>` and
   `[dry-run] Would set version …`, records the create/update, but performs no save and
   does not persist the version.

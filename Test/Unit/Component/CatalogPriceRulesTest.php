@@ -18,8 +18,11 @@ use Magebit\Configurator\Component\CatalogPriceRules\CatalogPriceRulesProcessor;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
 use Magebit\Configurator\Model\Export\ExportContext;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magento\CatalogRule\Api\CatalogRuleRepositoryInterface;
 use Magento\CatalogRule\Model\ResourceModel\Rule\Collection;
 use Magento\CatalogRule\Model\Rule;
+use Magento\CatalogRule\Model\Rule\Job;
 use Magento\CatalogRule\Model\RuleFactory;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -34,6 +37,26 @@ if (!class_exists(RuleFactory::class)) {
         'namespace Magento\CatalogRule\Model;'
         . ' class RuleFactory {'
         . ' public function create(array $data = []) {} }'
+    );
+}
+
+// The processor's removal path is exercised against a real CatalogRuleRepository
+// and Job. As with RuleFactory above, these Magento types are not guaranteed to
+// exist in the unit-test environment, so provide minimal stubs matching the
+// signatures the processor relies on (deleteById/save, applyAll).
+if (!interface_exists(CatalogRuleRepositoryInterface::class)) {
+    eval(
+        'namespace Magento\CatalogRule\Api;'
+        . ' interface CatalogRuleRepositoryInterface {'
+        . ' public function save($rule);'
+        . ' public function deleteById($ruleId); }'
+    );
+}
+
+if (!class_exists(Job::class)) {
+    eval(
+        'namespace Magento\CatalogRule\Model\Rule;'
+        . ' class Job { public function applyAll() {} }'
     );
 }
 
@@ -72,6 +95,8 @@ class CatalogPriceRulesTest extends TestCase
         $this->processor->expects($this->once())->method('setData')->with($rules)->willReturnSelf();
         $this->processor->expects($this->once())->method('setConfig')->with(['apply_all' => true])->willReturnSelf();
         $this->processor->expects($this->once())->method('setMode')->with(ComponentMode::Create)->willReturnSelf();
+        $this->processor->expects($this->once())->method('setDryRun')->with(false)->willReturnSelf();
+        $this->processor->expects($this->once())->method('setResult')->willReturnSelf();
         $this->processor->expects($this->once())->method('process');
 
         $result = $this->execute(['rules' => $rules, 'config' => ['apply_all' => true]]);
@@ -87,6 +112,8 @@ class CatalogPriceRulesTest extends TestCase
         $this->processor->method('setData')->willReturnSelf();
         $this->processor->method('setConfig')->with([])->willReturnSelf();
         $this->processor->expects($this->once())->method('setMode')->with(ComponentMode::Maintain)->willReturnSelf();
+        $this->processor->method('setDryRun')->willReturnSelf();
+        $this->processor->method('setResult')->willReturnSelf();
         $this->processor->expects($this->once())->method('process');
 
         $result = $this->execute(['rules' => $rules], false, ComponentMode::Maintain);
@@ -95,21 +122,48 @@ class CatalogPriceRulesTest extends TestCase
         $this->assertSame(1, $result->getCreated());
     }
 
-    public function testDryRunDoesNotInvokeProcessor(): void
+    public function testDryRunThreadsThroughProcessorWithoutPersisting(): void
     {
         $rules = [
             'rule1' => ['name' => 'Summer Sale'],
             'rule2' => ['name' => 'Winter Sale'],
         ];
 
-        // Dry-run records intent but must never touch the processor.
-        $this->processor->expects($this->never())->method('setData');
-        $this->processor->expects($this->never())->method('process');
+        // Dry-run still flows through the processor (so per-rule removals can be
+        // evaluated), but flags it as a dry run so the processor persists nothing.
+        $this->processor->method('setData')->with($rules)->willReturnSelf();
+        $this->processor->method('setConfig')->willReturnSelf();
+        $this->processor->method('setMode')->willReturnSelf();
+        $this->processor->expects($this->once())->method('setDryRun')->with(true)->willReturnSelf();
+        $this->processor->method('setResult')->willReturnSelf();
+        $this->processor->expects($this->once())->method('process');
 
         $result = $this->execute(['rules' => $rules], true);
 
         $this->assertTrue($result->isSuccessful());
         $this->assertSame(2, $result->getCreated());
+    }
+
+    public function testRemovalEntriesAreNotCountedAsCreated(): void
+    {
+        // A `remove: true` entry is deleted by the processor (which records the
+        // removal on the result); the component must not count it as created.
+        $rules = [
+            'rule1' => ['name' => 'Summer Sale'],
+            'rule2' => ['name' => 'Winter Sale', 'remove' => true],
+        ];
+
+        $this->processor->method('setData')->willReturnSelf();
+        $this->processor->method('setConfig')->willReturnSelf();
+        $this->processor->method('setMode')->willReturnSelf();
+        $this->processor->method('setDryRun')->willReturnSelf();
+        $this->processor->method('setResult')->willReturnSelf();
+        $this->processor->expects($this->once())->method('process');
+
+        $result = $this->execute(['rules' => $rules]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getCreated());
     }
 
     public function testRecordsErrorWhenRulesNodeMissing(): void
@@ -242,6 +296,119 @@ class CatalogPriceRulesTest extends TestCase
 
         // Entry kept untouched.
         $this->assertSame(['name' => 'Gone', 'version' => 2], $out['rules']['rule1']);
+    }
+
+    public function testProcessorRemovesExistingRule(): void
+    {
+        // `remove: true` on an existing rule deletes it (in either mode), records
+        // a removal and never saves it.
+        $rule = $this->givenRuleModel(['name' => 'Summer Sale']);
+        $rule->method('getId')->willReturn(7);
+
+        $collection = $this->givenCollection([]);
+        $collection->method('addFieldToFilter')->with('name', 'Summer Sale')->willReturnSelf();
+        $collection->method('getSize')->willReturn(1);
+        $collection->method('getFirstItem')->willReturn($rule);
+
+        $repo = $this->createMock(CatalogRuleRepositoryInterface::class);
+        $repo->expects($this->once())->method('deleteById')->with(7);
+        $repo->expects($this->never())->method('save');
+
+        $result = new ComponentResult();
+        $processor = $this->givenProcessor($collection, $repo);
+        $processor->setData(['rule1' => ['name' => 'Summer Sale', 'remove' => true]])
+            ->setConfig([])
+            ->setMode(ComponentMode::Maintain)
+            ->setDryRun(false)
+            ->setResult($result)
+            ->process();
+
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getSkipped());
+    }
+
+    public function testProcessorSkipsRemovalOfAbsentRule(): void
+    {
+        // `remove: true` on a rule that does not exist is idempotent: skip, no delete.
+        $rule = $this->givenRuleModel(['name' => 'Gone']);
+        $rule->method('getId')->willReturn(null);
+
+        $collection = $this->givenCollection([]);
+        $collection->method('addFieldToFilter')->with('name', 'Gone')->willReturnSelf();
+        $collection->method('getSize')->willReturn(0);
+        $collection->method('getFirstItem')->willReturn($rule);
+
+        $repo = $this->createMock(CatalogRuleRepositoryInterface::class);
+        $repo->expects($this->never())->method('deleteById');
+        $repo->expects($this->never())->method('save');
+
+        $result = new ComponentResult();
+        $processor = $this->givenProcessor($collection, $repo);
+        $processor->setData(['rule1' => ['name' => 'Gone', 'remove' => true]])
+            ->setConfig([])
+            ->setMode(ComponentMode::Maintain)
+            ->setDryRun(false)
+            ->setResult($result)
+            ->process();
+
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testProcessorDryRunRemovalDeletesNothing(): void
+    {
+        // Dry-run records the removal intent but must delete nothing.
+        $rule = $this->givenRuleModel(['name' => 'Summer Sale']);
+        $rule->method('getId')->willReturn(7);
+
+        $collection = $this->givenCollection([]);
+        $collection->method('addFieldToFilter')->with('name', 'Summer Sale')->willReturnSelf();
+        $collection->method('getSize')->willReturn(1);
+        $collection->method('getFirstItem')->willReturn($rule);
+
+        $repo = $this->createMock(CatalogRuleRepositoryInterface::class);
+        $repo->expects($this->never())->method('deleteById');
+        $repo->expects($this->never())->method('save');
+
+        $result = new ComponentResult();
+        $processor = $this->givenProcessor($collection, $repo);
+        $processor->setData(['rule1' => ['name' => 'Summer Sale', 'remove' => true]])
+            ->setConfig([])
+            ->setMode(ComponentMode::Maintain)
+            ->setDryRun(true)
+            ->setResult($result)
+            ->process();
+
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getSkipped());
+    }
+
+    /**
+     * Build a real processor whose ruleFactory->create()->getCollection() yields
+     * the given collection, wired to the given repository and stub Job/gate.
+     */
+    private function givenProcessor(
+        Collection&MockObject $collection,
+        CatalogRuleRepositoryInterface&MockObject $repo
+    ): CatalogPriceRulesProcessor {
+        $ruleFactory = $this->getMockBuilder(RuleFactory::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['create'])
+            ->getMock();
+        $ruleFactory->method('create')->willReturn($this->givenRuleWithCollection($collection));
+
+        $job = $this->getMockBuilder(Job::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $gate = $this->createMock(ReconciliationGate::class);
+
+        return new CatalogPriceRulesProcessor(
+            $this->createMock(LoggerInterface::class),
+            $ruleFactory,
+            $repo,
+            $job,
+            $gate
+        );
     }
 
     /**

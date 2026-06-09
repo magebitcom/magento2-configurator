@@ -136,6 +136,13 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
                 // Track whether we are creating a new block or updating an existing one
                 $isNew = $block === null;
 
+                // Explicit removal: `remove: true` deletes the block if it exists,
+                // in either mode. Idempotent — a block already absent is skipped.
+                if (!empty($data['remove'])) {
+                    $this->removeBlock($identifier, $block, $dryRun, $result);
+                    continue;
+                }
+
                 $request = new ReconciliationRequest(
                     self::ALIAS,
                     $versionKey,
@@ -188,8 +195,8 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
                         // phpcs:enable
                     }
 
-                    // Skip stores
-                    if ($key == "stores") {
+                    // Skip non-field control keys
+                    if ($key == "stores" || $key == "remove") {
                         continue;
                     }
 
@@ -253,6 +260,38 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
         }
+    }
+
+    /**
+     * Delete a block flagged with `remove: true`. Idempotent: a block that is
+     * already absent records a skip rather than an error. Honors dry-run.
+     *
+     * @param string $identifier
+     * @param Block|null $block
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @return void
+     */
+    private function removeBlock(
+        string $identifier,
+        ?Block $block,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
+        if ($block === null || !$block->getId()) {
+            $this->log->logComment(sprintf("Block '%s' not present, nothing to remove", $identifier));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove block %s', $identifier));
+        } else {
+            $this->blockRepository->deleteById((int) $block->getId());
+            $this->log->logInfo(sprintf('Removed block %s', $identifier));
+        }
+
+        $result->recordRemoved();
     }
 
     /**

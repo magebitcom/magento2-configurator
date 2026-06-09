@@ -140,6 +140,7 @@ class Pages implements ComponentInterface, ExportableComponentInterface
     ): void {
         try {
             foreach ($data['page'] as $pageData) {
+                $pageId = false;
                 if (isset($pageData['stores'])) {
                     foreach ($pageData['stores'] as $storeCode) {
                         $store = $this->storeRepository->get($storeCode);
@@ -147,6 +148,13 @@ class Pages implements ComponentInterface, ExportableComponentInterface
                     }
                 } else {
                     $pageId = $this->getPageIdByIdentifier($identifier, 0);
+                }
+
+                // Explicit removal: `remove: true` deletes the page if it exists,
+                // in either mode. Idempotent — a page already absent is skipped.
+                if (!empty($pageData['remove'])) {
+                    $this->removePage($identifier, $pageId, $dryRun, $result);
+                    continue;
                 }
 
                 $version = $pageData['version'] ?? null;
@@ -233,8 +241,8 @@ class Pages implements ComponentInterface, ExportableComponentInterface
                             // phpcs:enable
                         }
 
-                        // Skip stores
-                        if ($key == "stores") {
+                        // Skip non-field control keys
+                        if ($key == "stores" || $key == "remove") {
                             continue;
                         }
 
@@ -308,6 +316,38 @@ class Pages implements ComponentInterface, ExportableComponentInterface
         } catch (NoSuchEntityException $e) {
             $this->log->logError($e->getMessage());
         }
+    }
+
+    /**
+     * Delete a page flagged with `remove: true`. Idempotent: a page that is
+     * already absent records a skip rather than an error. Honors dry-run.
+     *
+     * @param string $identifier
+     * @param false|int $pageId
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @return void
+     */
+    protected function removePage(
+        string $identifier,
+        false|int $pageId,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
+        if (!$pageId) {
+            $this->log->logComment(sprintf("Page '%s' not present, nothing to remove", $identifier));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove page %s', $identifier));
+        } else {
+            $this->pageRepository->deleteById($pageId);
+            $this->log->logInfo(sprintf('Removed page %s', $identifier));
+        }
+
+        $result->recordRemoved();
     }
 
     /**
