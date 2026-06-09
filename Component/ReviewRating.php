@@ -14,6 +14,8 @@ use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Review\Model\Rating;
 use Magento\Review\Model\RatingFactory;
 use Magento\Review\Model\ResourceModel\Rating as RatingResource;
@@ -44,7 +46,8 @@ class ReviewRating implements ComponentInterface
         private readonly EntityFactory $entityFactory,
         private readonly RatingResource $ratingResource,
         private readonly RatingOptionResource $optionResource,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -66,10 +69,27 @@ class ReviewRating implements ComponentInterface
                 /** @var Rating $ratingModel */
                 $ratingModel = $this->getReviewRating((string) $code);
                 $existed = (bool) $ratingModel->getId();
+
+                $version = $reviewRating['version'] ?? null;
+                $request = new ReconciliationRequest(
+                    self::ALIAS,
+                    (string) $code,
+                    $context->getMode(),
+                    $existed,
+                    $version ? (int) $version : null
+                );
+
+                if ($this->gate->decide($request)->isSkip()) {
+                    $this->log->logComment(sprintf('Review rating "%s" exists, skipped (create mode)', $code));
+                    $result->recordSkipped();
+                    continue;
+                }
+
                 $ratingModel = $this->updateOrCreateRating($ratingModel, (string) $code, $reviewRating);
 
                 if ($dryRun) {
                     $this->log->logInfo(sprintf('[dry-run] Would update review rating "%s"', $code));
+                    $this->gate->commitVersion($request, $dryRun);
                     $existed ? $result->recordUpdated() : $result->recordCreated();
                     continue;
                 }
@@ -77,6 +97,7 @@ class ReviewRating implements ComponentInterface
                 $this->ratingResource->save($ratingModel);
                 $this->setOptions($ratingModel, $dryRun);
                 $this->log->logInfo((string) __('Updated review rating "%1"', $code));
+                $this->gate->commitVersion($request, $dryRun);
                 $existed ? $result->recordUpdated() : $result->recordCreated();
             } catch (\Exception $e) {
                 $this->log->logError(

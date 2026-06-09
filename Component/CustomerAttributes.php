@@ -14,6 +14,7 @@ use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magento\Customer\Model\Customer;
 use Magento\Eav\Setup\EavSetup;
 use Magento\Framework\Exception\LocalizedException;
@@ -65,9 +66,10 @@ class CustomerAttributes extends Attributes
         private readonly Attribute $attributeResource,
         LoggerInterface $log,
         AttrOptionCollectionFactory $attrOptionCollectionFactory,
-        EavConfig $eavConfig
+        EavConfig $eavConfig,
+        ReconciliationGate $gate
     ) {
-        parent::__construct($eavSetup, $attributeRepository, $log, $attrOptionCollectionFactory, $eavConfig);
+        parent::__construct($eavSetup, $attributeRepository, $log, $attrOptionCollectionFactory, $eavConfig, $gate);
         $this->attributeConfigMap = array_merge($this->attributeConfigMap, $this->customerConfigMap);
     }
 
@@ -83,7 +85,13 @@ class CustomerAttributes extends Attributes
 
         try {
             foreach ($data['customer_attributes'] as $attributeCode => $attributeConfiguration) {
-                $this->processAttribute($attributeCode, $attributeConfiguration, $context->isDryRun(), $result);
+                $this->processAttribute(
+                    $attributeCode,
+                    $attributeConfiguration,
+                    $context->getMode(),
+                    $context->isDryRun(),
+                    $result
+                );
                 $this->addAdditionalValues($attributeCode, $attributeConfiguration, $context->isDryRun());
             }
         } catch (ComponentException $e) {

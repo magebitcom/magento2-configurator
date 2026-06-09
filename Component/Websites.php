@@ -11,10 +11,13 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Store\Model\Group;
 use Magento\Store\Model\GroupFactory;
 use Magento\Store\Model\Store;
@@ -37,7 +40,8 @@ class Websites implements ComponentInterface
         private readonly WebsiteFactory $websiteFactory,
         private readonly StoreFactory $storeFactory,
         private readonly GroupFactory $groupFactory,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -52,27 +56,28 @@ class Websites implements ComponentInterface
         }
 
         $dryRun = $context->isDryRun();
+        $mode = $context->getMode();
 
         try {
             // Loop through the websites
             foreach ($data['websites'] as $code => $websiteData) {
                 // Process the website
-                $website = $this->processWebsite($code, $websiteData, $dryRun, $result);
+                $website = $this->processWebsite($code, $websiteData, $mode, $dryRun, $result);
 
                 // Loop through the store groups
                 foreach ($websiteData['store_groups'] as $storeGroupData) {
                     // Process the store group
-                    $storeGroup = $this->processStoreGroup($storeGroupData, $website, $dryRun, $result);
+                    $storeGroup = $this->processStoreGroup($storeGroupData, $website, $mode, $dryRun, $result);
 
                     // Loop through the store views
                     foreach ($storeGroupData['store_views'] as $code => $storeViewData) {
                         // Process the store view
-                        $this->processStoreView($code, $storeViewData, $storeGroup, $dryRun, $result);
+                        $this->processStoreView($code, $storeViewData, $storeGroup, $mode, $dryRun, $result);
                     }
 
                     // As the store may not be created yet, associated the default store to the store group
                     // has to be completed after all stores for the store group have been created.
-                    $this->setDefaultStore($storeGroup, $storeGroupData, $dryRun, $result);
+                    $this->setDefaultStore($storeGroup, $storeGroupData, $mode, $dryRun, $result);
                 }
             }
 
@@ -100,7 +105,7 @@ class Websites implements ComponentInterface
      * @return Website
      * @SuppressWarnings(PHPMD)
      */
-    protected function processWebsite($code, $websiteData, bool $dryRun, ComponentResult $result)
+    protected function processWebsite($code, $websiteData, ComponentMode $mode, bool $dryRun, ComponentResult $result)
     {
         $logNest = 1;
 
@@ -109,6 +114,15 @@ class Websites implements ComponentInterface
 
             $website = $this->websiteFactory->create();
             $website->load($code, 'code');
+
+            // In create mode an existing website is returned untouched so child
+            // groups/stores can still attach, but its attributes are not modified.
+            $request = new ReconciliationRequest(self::ALIAS, 'website_' . $code, $mode, (bool) $website->getId());
+            if ($website->getId() && $this->gate->decide($request)->isSkip()) {
+                $this->log->logComment(sprintf("Website '%s' exists, skip modifying (create mode)", $code), $logNest);
+                $result->recordSkipped();
+                return $website;
+            }
 
             $canSave = false;
             $isNew = false;
@@ -177,8 +191,13 @@ class Websites implements ComponentInterface
      * @return Group
      * @SuppressWarnings(PHPMD)
      */
-    protected function processStoreGroup($storeGroupData, Website $website, bool $dryRun, ComponentResult $result)
-    {
+    protected function processStoreGroup(
+        $storeGroupData,
+        Website $website,
+        ComponentMode $mode,
+        bool $dryRun,
+        ComponentResult $result
+    ) {
         $logNest = 2;
 
         try {
@@ -201,6 +220,22 @@ class Websites implements ComponentInterface
                 $storeGroup->load($storeGroupData['group_id']);
             } else {
                 $storeGroup->load($storeGroupData['name'], 'name');
+            }
+
+            // Create mode protects an existing store group from modification.
+            $request = new ReconciliationRequest(
+                self::ALIAS,
+                'group_' . ($storeGroupData['group_id'] ?? $storeGroupData['name']),
+                $mode,
+                (bool) $storeGroup->getId()
+            );
+            if ($storeGroup->getId() && $this->gate->decide($request)->isSkip()) {
+                $this->log->logComment(
+                    sprintf("Store group '%s' exists, skip modifying (create mode)", $storeGroupData['name']),
+                    $logNest
+                );
+                $result->recordSkipped();
+                return $storeGroup;
             }
 
             $canSave = false;
@@ -276,8 +311,14 @@ class Websites implements ComponentInterface
      * @return Store
      * @SuppressWarnings(PHPMD)
      */
-    protected function processStoreView($code, $storeViewData, Group $storeGroup, bool $dryRun, ComponentResult $result)
-    {
+    protected function processStoreView(
+        $code,
+        $storeViewData,
+        Group $storeGroup,
+        ComponentMode $mode,
+        bool $dryRun,
+        ComponentResult $result
+    ) {
         $logNest = 3;
 
         try {
@@ -285,6 +326,14 @@ class Websites implements ComponentInterface
 
             $storeView = $this->storeFactory->create();
             $storeView->load($code, 'code');
+
+            // Create mode protects an existing store view from modification.
+            $request = new ReconciliationRequest(self::ALIAS, 'storeview_' . $code, $mode, (bool) $storeView->getId());
+            if ($storeView->getId() && $this->gate->decide($request)->isSkip()) {
+                $this->log->logComment(sprintf("Store view '%s' exists, skip modifying (create mode)", $code), $logNest);
+                $result->recordSkipped();
+                return $storeView;
+            }
 
             $canSave = false;
             $isNew = false;
@@ -362,8 +411,13 @@ class Websites implements ComponentInterface
      * @param $storeGroupData
      * @SuppressWarnings(PHPMD)
      */
-    protected function setDefaultStore(Group $storeGroup, $storeGroupData, bool $dryRun, ComponentResult $result): void
-    {
+    protected function setDefaultStore(
+        Group $storeGroup,
+        $storeGroupData,
+        ComponentMode $mode,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
         $logNest = 2;
 
         try {
@@ -395,6 +449,12 @@ class Websites implements ComponentInterface
             if ($storeGroup->getDefaultStoreId() == $storeView->getId()) {
                 $this->log->logComment(
                     sprintf("No change with the default store for '%s", $storeGroup->getName()),
+                    $logNest
+                );
+            } elseif ($mode === ComponentMode::Create && $storeGroup->getDefaultStoreId()) {
+                // Create mode does not repoint an existing group's default store.
+                $this->log->logComment(
+                    sprintf("Skip changing default store for existing group '%s' (create mode)", $storeGroup->getName()),
                     $logNest
                 );
             } else {

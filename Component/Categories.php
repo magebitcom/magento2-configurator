@@ -11,11 +11,13 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
-use Magebit\Configurator\Model\Processor;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Catalog\Model\Category;
 use Magento\Catalog\Model\CategoryFactory;
 use Magento\Catalog\Model\ResourceModel\Category as CategoryResource;
@@ -51,7 +53,8 @@ class Categories implements ComponentInterface
         private readonly LoggerInterface $log,
         private readonly BlockFactory $blockFactory,
         private readonly BlockResource $blockResource,
-        private readonly CategoryResource $categoryResource
+        private readonly CategoryResource $categoryResource,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -62,7 +65,7 @@ class Categories implements ComponentInterface
     {
         $result = new ComponentResult();
         $data = $context->getData();
-        $mode = $context->getMode()->value;
+        $mode = $context->getMode();
 
         if (!isset($data['categories']) || !is_array($data['categories'])) {
             $result->addError('No "categories" node found in the source data.');
@@ -127,7 +130,7 @@ class Categories implements ComponentInterface
      *
      * @param Category $parentCategory
      * @param array $categories
-     * @param string $mode
+     * @param ComponentMode $mode
      * @param bool $dryRun
      * @param ComponentResult $result
      * @return void
@@ -137,7 +140,7 @@ class Categories implements ComponentInterface
     public function createOrUpdateCategory(
         Category $parentCategory,
         array $categories,
-        string $mode,
+        ComponentMode $mode,
         bool $dryRun,
         ComponentResult $result
     ): void {
@@ -154,7 +157,16 @@ class Categories implements ComponentInterface
 
             $exists = (bool) $category->getId();
 
-            if ($exists && $mode === Processor::MODE_CREATE) {
+            $version = $categoryValues['version'] ?? null;
+            $request = new ReconciliationRequest(
+                self::ALIAS,
+                $parentCategory->getId() . '_' . $categoryValues['name'],
+                $mode,
+                $exists,
+                $version ? (int) $version : null
+            );
+
+            if ($this->gate->decide($request)->isSkip()) {
                 $this->log->logComment(sprintf("Skip category '%s' modification in create mode: ", $categoryValues['name']));
                 $result->recordSkipped();
                 continue;
@@ -231,6 +243,8 @@ class Categories implements ComponentInterface
                 );
                 $exists ? $result->recordUpdated() : $result->recordCreated();
             }
+
+            $this->gate->commitVersion($request, $dryRun);
 
             if (isset($categoryValues['categories'])) {
                 $this->createOrUpdateCategory($category, $categoryValues['categories'], $mode, $dryRun, $result);

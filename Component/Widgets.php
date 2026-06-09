@@ -11,10 +11,13 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Cms\Api\BlockRepositoryInterface;
 use Magento\Framework\Api\SearchCriteriaBuilder;
 use Magento\Framework\App\Area as AppArea;
@@ -43,7 +46,8 @@ class Widgets implements ComponentInterface
         private readonly AppState $appState,
         private readonly BlockRepositoryInterface $blockRepository,
         private readonly SearchCriteriaBuilder $criteriaBuilder,
-        private readonly WidgetInstanceResource $widgetResource
+        private readonly WidgetInstanceResource $widgetResource,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -59,7 +63,7 @@ class Widgets implements ComponentInterface
 
         try {
             foreach ($data as $widgetData) {
-                $this->processWidget($widgetData, $context->isDryRun(), $result);
+                $this->processWidget($widgetData, $context->getMode(), $context->isDryRun(), $result);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -69,15 +73,32 @@ class Widgets implements ComponentInterface
         return $result;
     }
 
-    public function processWidget(array $widgetData, bool $dryRun, ComponentResult $result): void
-    {
+    public function processWidget(
+        array $widgetData,
+        ComponentMode $mode,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
         try {
             // Capture the configured stores so block references resolve in the right scope.
             $stores = (isset($widgetData['stores']) && is_array($widgetData['stores']))
                 ? $widgetData['stores']
                 : null;
 
+            $version = $widgetData['version'] ?? null;
+            if ($version) {
+                unset($widgetData['version']);
+            }
+
             $widget = $this->findWidgetByInstanceTypeAndTitle($widgetData['instance_type'], $widgetData['title']);
+
+            $request = new ReconciliationRequest(
+                self::ALIAS,
+                $widgetData['instance_type'] . '|' . $widgetData['title'],
+                $mode,
+                $widget !== null,
+                $version ? (int) $version : null
+            );
 
             $isNew = false;
             $canSave = false;
@@ -88,6 +109,14 @@ class Widgets implements ComponentInterface
                  * @var Instance $widget
                  */
                 $widget = $this->widgetFactory->create();
+            } elseif ($this->gate->decide($request)->isSkip()) {
+                // In create mode an existing widget is left untouched (unless its version bumped).
+                $this->log->logComment(
+                    sprintf("Widget '%s' exists, skip modifying it (create mode)", $widgetData['title']),
+                    1
+                );
+                $result->recordSkipped();
+                return;
             }
 
             foreach ($widgetData as $key => $value) {
@@ -132,6 +161,7 @@ class Widgets implements ComponentInterface
                     sprintf('[dry-run] Would save Widget %s', $widget->getTitle()),
                     1
                 );
+                $this->gate->commitVersion($request, $dryRun);
                 $isNew ? $result->recordCreated() : $result->recordUpdated();
                 return;
             }
@@ -144,6 +174,7 @@ class Widgets implements ComponentInterface
             );
 
             $this->log->logInfo(sprintf("Saved Widget %s", $widget->getTitle()), 1);
+            $this->gate->commitVersion($request, $dryRun);
             $isNew ? $result->recordCreated() : $result->recordUpdated();
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
