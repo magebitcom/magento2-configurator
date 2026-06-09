@@ -141,15 +141,31 @@ class CatalogPriceRules implements ComponentInterface, ExportableComponentInterf
                 continue;
             }
 
-            // Rebuild value fields from the DB, preserving non-value keys
-            // (name, version, and any extra keys already in the entry).
+            // A tracked rule exports EVERYTHING about it: re-read the full field
+            // set from the DB (relations such as website_ids/customer_group_ids
+            // re-resolved by ruleToSource) so admin changes to previously
+            // untracked fields are captured. Null/empty values are skipped to
+            // keep the file clean.
+            $entry = ['name' => $name];
             $current = $this->ruleToSource($model);
             foreach (self::EXPORT_FIELDS as $field) {
-                if (array_key_exists($field, $current)) {
-                    $rule[$field] = $current[$field];
+                $value = $current[$field] ?? null;
+                if ($value === null || $value === '' || $value === []) {
+                    continue;
                 }
+                $entry[$field] = $value;
             }
-            $refreshed[$key] = $rule;
+
+            // Preserve the tracked entry's non-DB structural keys (e.g. version),
+            // i.e. anything that is neither the identity key nor a value field.
+            foreach ($rule as $existingKey => $existingValue) {
+                if ($existingKey === 'name' || in_array($existingKey, self::EXPORT_FIELDS, true)) {
+                    continue;
+                }
+                $entry[$existingKey] = $existingValue;
+            }
+
+            $refreshed[$key] = $entry;
         }
 
         $out['rules'] = $refreshed;
