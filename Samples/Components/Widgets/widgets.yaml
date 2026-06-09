@@ -17,3 +17,8 @@
     - default
   parameters:
     block_id: 13
+  # Layout placement: show this widget in the content block on every page.
+  page_groups:
+    - page_group: all_pages
+      block: content
+      for: all

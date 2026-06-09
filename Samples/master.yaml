@@ -1,50 +1,63 @@
+# Configurator master file.
+#
+# Each component has: `enabled` (0/1), `sources` (paths relative to the Magento
+# base dir), an optional `type` (yaml/csv/json), an optional per-environment
+# `env` block (per-env `mode: create|maintain` and `log` level), and an optional
+# component-level `version:` (run the whole component once per version bump).
+#
+# Components run top-to-bottom; order matters where one depends on another
+# (e.g. inventory_sources before products, attributes before attribute_sets).
+# See the README "Reconciliation: modes & versioning" section for mode/version
+# semantics. In create mode (the default) existing entities are protected.
+
 websites:
   enabled: 1
-  method: code
   sources:
-      - ../configurator/websites.yaml
+    - ../configurator/websites.yaml
   env:
-      local:
-        log: info
-      qa:
-        log: notice
-      stage:
-        log: warning
-      live:
-        log: error
+    local:
+      log: info
+    qa:
+      log: notice
+    stage:
+      log: warning
+    live:
+      log: error
 config:
   enabled: 1
-  method: code
   sources:
     - ../configurator/Configuration/global.yaml
     - ../configurator/Configuration/base-website-config.yaml
 sequence:
   enabled: 1
-  method: code
   sources:
     - ../configurator/Sequence/sequence.yaml
 attributes:
   enabled: 1
-  method: code
   sources:
     - ../configurator/Attributes/attributes.yaml
 attribute_sets:
   enabled: 1
-  method: code
   sources:
     - ../configurator/Attributes/attribute_sets.yaml
 categories:
   enabled: 1
-  method: code
   sources:
     - ../configurator/Categories/categories.yaml
   env:
     local:
       mode: maintain
       log: debug
+inventory_sources:
+  enabled: 1
+  sources:
+    - ../configurator/InventorySources/inventory_sources.yaml
+  env:
+    local:
+      mode: maintain
+      log: debug
 products:
   enabled: 1
-  method: code
   sources:
     - ../configurator/Products/simple.csv
     - ../configurator/Products/configurable.csv
@@ -52,9 +65,16 @@ products:
     local:
       mode: maintain
       log: debug
+tiered_prices:
+  enabled: 1
+  sources:
+    - ../configurator/TieredPrices/prices.csv
+  env:
+    local:
+      mode: maintain
+      log: debug
 blocks:
   enabled: 1
-  method: code
   sources:
     - ../configurator/Blocks/blocks.yaml
   env:
@@ -63,12 +83,10 @@ blocks:
       log: debug
 apiintegrations:
   enabled: 1
-  method: code
   sources:
     - ../configurator/ApiIntegrations/apiintegrations.yaml
 taxrates:
   enabled: 1
-  method: code
   sources:
     - ../configurator/TaxRates/taxrates.csv
   env:
@@ -77,7 +95,6 @@ taxrates:
       log: debug
 taxrules:
   enabled: 1
-  method: code
   sources:
     - ../configurator/TaxRules/taxrules.csv
   env:
@@ -86,7 +103,6 @@ taxrules:
       log: debug
 pages:
   enabled: 1
-  method: code
   sources:
     - ../configurator/Pages/pages.yaml
   env:
@@ -95,7 +111,6 @@ pages:
       log: debug
 widgets:
   enabled: 1
-  method: code
   sources:
     - ../configurator/Widgets/widgets.yaml
   env:
@@ -104,7 +119,6 @@ widgets:
       log: debug
 customergroups:
   enabled: 1
-  method: code
   sources:
     - ../configurator/CustomerGroups/customergroups.yaml
   env:
@@ -113,7 +127,6 @@ customergroups:
       log: debug
 adminroles:
   enabled: 1
-  method: code
   sources:
     - ../configurator/AdminRoles/adminroles.yaml
     - ../configurator/AdminRoles/apiroles.yaml
@@ -123,7 +136,6 @@ adminroles:
       log: debug
 adminusers:
   enabled: 1
-  method: code
   sources:
     - ../configurator/AdminUsers/adminusers.yaml
     - ../configurator/AdminUsers/apiusers.yaml
@@ -133,53 +145,54 @@ adminusers:
       log: debug
 media:
   enabled: 1
-  method: code
   sources:
     - ../configurator/Media/media.yaml
 rewrites:
   enabled: 1
-  method: code
   sources:
     - ../configurator/Rewrites/rewrites.csv
 review_rating:
   enabled: 1
-  method: code
   sources:
     - ../configurator/ReviewRating/reviewrating.yaml
 product_links:
   enabled: 1
-  method: code
   sources:
     - ../configurator/ProductLinks/related.yaml
     - ../configurator/ProductLinks/cross-sells.yaml
     - ../configurator/ProductLinks/up-sells.yaml
 customer_attributes:
   enabled: 1
-  method: code
   sources:
     - ../configurator/CustomerAttributes/customer_attributes.yaml
 customers:
   enabled: 1
-  method: code
   sources:
     - ../configurator/Customers/customers.csv
 sql:
   enabled: 1
-  method: code
   sources:
-      - ../configurator/Sql/sql.yaml
+    - ../configurator/Sql/sql.yaml
 catalog_price_rules:
   enabled: 1
-  method: code
   sources:
     - ../configurator/catalog_price_rules.yaml
 shippingtablerates:
   enabled: 1
-  method: code
   sources:
     - ../configurator/ShippingTableRates/shippingtablerates.yaml
 order_statuses:
   enabled: 1
-  method: code
   sources:
     - ../configurator/OrderStatuses/orderstatuses.yaml
+
+# Hyvä Commerce CMS components — optional, require the paid Hyva_CmsMagento
+# module. Disabled by default; enable on Hyvä Commerce CMS projects.
+hyva_pages:
+  enabled: 0
+  sources:
+    - ../configurator/HyvaPages/hyva_pages.yaml
+hyva_blocks:
+  enabled: 0
+  sources:
+    - ../configurator/HyvaBlocks/hyva_blocks.yaml

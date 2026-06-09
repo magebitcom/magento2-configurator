@@ -1,0 +1,12 @@
+# Hyvä Commerce CMS block content, keyed by the CMS block identifier.
+# Requires the paid Hyva_CmsMagento module; no-ops without it.
+home-hero:
+  # The backing CMS block is created automatically when missing.
+  auto_create_block: true
+  block_title: "Home Hero"
+  block_is_active: true
+  store_ids:
+    - 0
+  content: '{"contentId":"0","elements":[]}'
+  is_liveview_enabled: true
+  version: 1

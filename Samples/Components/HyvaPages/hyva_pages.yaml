@@ -1,0 +1,9 @@
+# Hyvä Commerce CMS page-builder content, keyed by the native CMS page
+# identifier (the page must already exist — see the pages component).
+# Requires the paid Hyva_CmsMagento module; no-ops without it.
+about-us:
+  # Inline JSON applied to both draft and published. For real content prefer a
+  # file: `content_source: ../configurator/HyvaPages/content/about-us.json`
+  content: '{"contentId":"0","elements":[]}'
+  is_liveview_enabled: true
+  version: 1
