@@ -17,6 +17,7 @@ use Magebit\Configurator\Model\ComponentResult;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magento\Customer\Model\Customer;
 use Magento\Eav\Setup\EavSetup;
+use Magento\Framework\Api\SearchCriteriaBuilder;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Eav\Model\AttributeRepository;
 use Magento\Customer\Setup\CustomerSetupFactory;
@@ -24,6 +25,7 @@ use Magento\Customer\Setup\CustomerSetup;
 use Magento\Customer\Model\ResourceModel\Attribute;
 use Magento\Eav\Model\Config as EavConfig;
 use Magento\Eav\Model\ResourceModel\Entity\Attribute\Option\CollectionFactory as AttrOptionCollectionFactory;
+use Magento\Swatches\Helper\Data as SwatchHelper;
 
 /**
  * @SuppressWarnings(PHPMD.LongVariable)
@@ -67,9 +69,20 @@ class CustomerAttributes extends Attributes
         LoggerInterface $log,
         AttrOptionCollectionFactory $attrOptionCollectionFactory,
         EavConfig $eavConfig,
-        ReconciliationGate $gate
+        ReconciliationGate $gate,
+        SearchCriteriaBuilder $searchCriteriaBuilder,
+        SwatchHelper $swatchHelper
     ) {
-        parent::__construct($eavSetup, $attributeRepository, $log, $attrOptionCollectionFactory, $eavConfig, $gate);
+        parent::__construct(
+            $eavSetup,
+            $attributeRepository,
+            $log,
+            $attrOptionCollectionFactory,
+            $eavConfig,
+            $gate,
+            $searchCriteriaBuilder,
+            $swatchHelper
+        );
         $this->attributeConfigMap = array_merge($this->attributeConfigMap, $this->customerConfigMap);
     }
 

@@ -12,24 +12,28 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\ComponentMode;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Catalog\Model\Product;
 use Magento\Eav\Api\AttributeRepositoryInterface;
 use Magento\Eav\Setup\EavSetup;
+use Magento\Framework\Api\SearchCriteriaBuilder;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Catalog\Model\ResourceModel\Eav\Attribute;
 use Magento\Eav\Model\Config as EavConfig;
 use Magento\Eav\Model\ResourceModel\Entity\Attribute\Option\CollectionFactory as AttrOptionCollectionFactory;
+use Magento\Swatches\Helper\Data as SwatchHelper;
 
 /**
  * @SuppressWarnings(PHPMD.LongVariable)
  */
-class Attributes implements ComponentInterface
+class Attributes implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'attributes';
     private const DESCRIPTION = 'Component to create/maintain attributes.';
@@ -99,7 +103,9 @@ class Attributes implements ComponentInterface
         protected readonly LoggerInterface $log,
         protected readonly AttrOptionCollectionFactory $attrOptionCollectionFactory,
         protected readonly EavConfig $eavConfig,
-        protected readonly ReconciliationGate $gate
+        protected readonly ReconciliationGate $gate,
+        protected readonly SearchCriteriaBuilder $searchCriteriaBuilder,
+        protected readonly SwatchHelper $swatchHelper
     ) {
     }
 
@@ -317,6 +323,197 @@ class Attributes implements ComponentInterface
         //$optionsToRemove = array_diff($existingAttributeOptions, $option['values']);
 
         return $optionsToAdd;
+    }
+
+    /**
+     * Export attribute definitions in the source format. Refresh mode rewrites
+     * only the keys already tracked per attribute (with current DB values); full
+     * mode dumps every user-defined attribute (optionally code-prefix filtered).
+     * The top node is the component alias ('attributes' / 'customer_attributes'),
+     * so this works unchanged for the CustomerAttributes subclass.
+     */
+    public function export(ExportContext $context): array
+    {
+        $node = $this->getAlias();
+
+        if ($context->isFullExport()) {
+            return [$node => $this->exportAllAttributes($context->getFilter())];
+        }
+
+        $existing = $context->getExistingData();
+        $tracked = (isset($existing[$node]) && is_array($existing[$node])) ? $existing[$node] : [];
+
+        $out = [];
+        foreach ($tracked as $code => $entry) {
+            $entry = is_array($entry) ? $entry : [];
+            $attributeArray = $this->eavSetup->getAttribute($this->entityTypeId, (string) $code);
+            if (!$attributeArray || empty($attributeArray['attribute_id'])) {
+                // Attribute no longer exists; keep the tracked entry untouched.
+                $out[$code] = $entry;
+                continue;
+            }
+
+            $full = $this->buildExportEntry((string) $code, $attributeArray);
+            foreach ($entry as $key => $ignored) {
+                if ($key === 'option') {
+                    if (isset($full['option'])) {
+                        $entry['option'] = $full['option'];
+                    }
+                    continue;
+                }
+                if (array_key_exists($key, $full)) {
+                    $entry[$key] = $full[$key];
+                }
+            }
+            $out[$code] = $entry;
+        }
+
+        return [$node => $out];
+    }
+
+    /**
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAllAttributes(?string $filter): array
+    {
+        $this->searchCriteriaBuilder->addFilter('is_user_defined', 1);
+        if ($filter !== null && $filter !== '') {
+            $this->searchCriteriaBuilder->addFilter('attribute_code', $filter . '%', 'like');
+        }
+
+        $out = [];
+        try {
+            $list = $this->attributeRepository->getList($this->entityTypeId, $this->searchCriteriaBuilder->create());
+        } catch (\Exception $e) {
+            $this->log->logError(sprintf('Could not list attributes for export: %s', $e->getMessage()));
+            return $out;
+        }
+
+        foreach ($list->getItems() as $attribute) {
+            $code = (string) $attribute->getAttributeCode();
+            $attributeArray = $this->eavSetup->getAttribute($this->entityTypeId, $code);
+            if (!$attributeArray || empty($attributeArray['attribute_id'])) {
+                continue;
+            }
+            $out[$code] = $this->buildExportEntry($code, $attributeArray);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Build a full source-format entry for one attribute by reversing the
+     * friendly-key map, splitting apply_to into product_types, resolving the
+     * (swatch-aware) input, and exporting any options.
+     *
+     * @param string $code
+     * @param array $attributeArray
+     * @return array
+     */
+    private function buildExportEntry(string $code, array $attributeArray): array
+    {
+        $entry = [];
+        foreach (array_flip($this->attributeConfigMap) as $eavKey => $yamlKey) {
+            if (!array_key_exists($eavKey, $attributeArray)) {
+                continue;
+            }
+            $value = $attributeArray[$eavKey];
+            if ($yamlKey === 'product_types') {
+                if ($value === null || $value === '') {
+                    continue;
+                }
+                $value = explode(',', (string) $value);
+            }
+            if ($value === null) {
+                continue;
+            }
+            $entry[$yamlKey] = $value;
+        }
+
+        $input = $this->resolveExportInput($code, $attributeArray);
+        $entry['input'] = $input;
+
+        $options = $this->exportOptionValues($code, $input);
+        if ($options !== null) {
+            $entry['option'] = ['values' => $options];
+        }
+
+        return $entry;
+    }
+
+    /**
+     * Resolve the source `input` value: a product attribute backed by a swatch
+     * is reported as swatch_visual / swatch_text; otherwise the frontend_input.
+     */
+    private function resolveExportInput(string $code, array $attributeArray): string
+    {
+        $frontendInput = (string) ($attributeArray['frontend_input'] ?? 'text');
+        if ($this->entityTypeId !== Product::ENTITY) {
+            return $frontendInput;
+        }
+
+        try {
+            $attribute = $this->eavConfig->getAttribute($this->entityTypeId, $code);
+            if ($attribute && $attribute->getId() && $this->swatchHelper->isSwatchAttribute($attribute)) {
+                return $this->swatchHelper->isVisualSwatch($attribute) ? 'swatch_visual' : 'swatch_text';
+            }
+        } catch (\Exception $e) {
+            // Fall back to the plain frontend input.
+        }
+
+        return $frontendInput;
+    }
+
+    /**
+     * Export an attribute's options: a list of labels for plain selects, or a
+     * label => swatch-value map for swatches. Null when the attribute has no
+     * options (non select/multiselect).
+     *
+     * @return array|null
+     */
+    private function exportOptionValues(string $code, string $input): ?array
+    {
+        try {
+            $attribute = $this->eavConfig->getAttribute($this->entityTypeId, $code);
+        } catch (\Exception $e) {
+            return null;
+        }
+        if (!$attribute || !$attribute->getId()
+            || !in_array($attribute->getFrontendInput(), ['select', 'multiselect'], true)
+        ) {
+            return null;
+        }
+
+        try {
+            $options = $attribute->getOptions() ?: [];
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        $labelsById = [];
+        foreach ($options as $option) {
+            $value = $option->getValue();
+            if ($value === '' || $value === null) {
+                // Skip the empty "-- Please Select --" placeholder option.
+                continue;
+            }
+            $labelsById[(int) $value] = (string) $option->getLabel();
+        }
+        if ($labelsById === []) {
+            return null;
+        }
+
+        if (in_array($input, ['swatch_visual', 'swatch_text'], true)) {
+            $swatches = $this->swatchHelper->getSwatchesByOptionsId(array_keys($labelsById));
+            $map = [];
+            foreach ($labelsById as $optionId => $label) {
+                $map[$label] = $swatches[$optionId]['value'] ?? '';
+            }
+            return $map;
+        }
+
+        return array_values($labelsById);
     }
 
     public function getAlias(): string
