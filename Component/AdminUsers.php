@@ -212,12 +212,16 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
     }
 
     /**
-     * Export current admin users into the source format. Refresh mode rewrites
-     * only the role sets / users already tracked in the source file, pulling each
-     * tracked user's current fields from the DB (matched by email); a tracked user
-     * that no longer exists is kept untouched. Full mode dumps every admin user,
-     * grouped by their assigned role's name (optionally filtered by role-name
-     * prefix). The password is a secret and is never written out.
+     * Export current admin users into the source format. Refresh mode re-reads
+     * every tracked user's full current state from the DB (matched by email):
+     * all value fields (username/firstname/secondname/email, optional
+     * interface_locale) plus the `role` relation, which is re-resolved so the
+     * user is regrouped under its current role's name — admin changes to either a
+     * field or the assigned role are captured, not just the keys already tracked.
+     * A tracked user that no longer exists is kept untouched under its original
+     * role set. Full mode dumps every admin user, grouped by their assigned
+     * role's name (optionally filtered by role-name prefix). The password is a
+     * secret and is never written out.
      */
     public function export(ExportContext $context): array
     {
@@ -227,9 +231,11 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
     }
 
     /**
-     * Refresh each tracked user's value fields from the DB (matched by email),
-     * preserving any other keys (version, interface_locale) and the role grouping.
-     * Users with no matching DB record are kept exactly as they are in the source.
+     * Re-read each tracked user's full current state from the DB (matched by
+     * email), re-resolving the `role` relation so users land under their current
+     * role's name. Users with no matching DB record are kept exactly as they are
+     * in the source, under their original role set. Role sets that hold no tracked
+     * users (or are malformed) are preserved as-is so non-user keys survive.
      *
      * @param array $existing
      * @return array
@@ -241,50 +247,96 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
         }
 
         $out = $existing;
+
+        // Index role sets by name so a user whose role changed in the DB can be
+        // moved into the matching tracked role set (when one exists).
+        $roleSetIndex = [];
+        foreach ($existing['adminusers'] as $i => $roleSet) {
+            if (is_array($roleSet) && isset($roleSet['rolename'])) {
+                $roleSetIndex[(string) $roleSet['rolename']] = $i;
+            }
+        }
+
+        // Pass 1: strip every tracked user from its source role set, refreshing
+        // each one's full state (or keeping it untouched when it no longer exists).
+        // Collect the refreshed entries together with their current DB role name.
+        $refreshed = [];
         foreach ($existing['adminusers'] as $i => $roleSet) {
             if (!is_array($roleSet) || !isset($roleSet['users']) || !is_array($roleSet['users'])) {
                 continue;
             }
 
-            $users = [];
+            $keep = [];
             foreach ($roleSet['users'] as $userData) {
                 $email = is_array($userData) ? ($userData['email'] ?? null) : null;
-                $current = $email !== null ? $this->loadUserByEmail((string) $email) : null;
+                $user = $email !== null ? $this->loadUserByEmail((string) $email) : null;
 
-                if ($current === null) {
-                    $users[] = $userData;
+                if ($user === null) {
+                    // No matching DB record: keep the source entry where it is.
+                    $keep[] = $userData;
                     continue;
                 }
 
-                $users[] = $this->refreshUserEntry((array) $userData, $current);
+                $refreshed[] = [
+                    'rolename' => $this->getRoleNameForUser($user),
+                    'entry' => $this->refreshUserEntry((array) $userData, $user),
+                ];
             }
 
-            $out['adminusers'][$i]['users'] = $users;
+            $out['adminusers'][$i]['users'] = $keep;
+        }
+
+        // Pass 2: place each refreshed user under its current role's role set,
+        // creating a new role set when the role isn't already tracked.
+        foreach ($refreshed as $item) {
+            $roleName = $item['rolename'];
+
+            if ($roleName === null) {
+                continue;
+            }
+
+            if (!isset($roleSetIndex[$roleName])) {
+                $out['adminusers'][] = ['rolename' => $roleName, 'users' => []];
+                $roleSetIndex[$roleName] = array_key_last($out['adminusers']);
+            }
+
+            $out['adminusers'][$roleSetIndex[$roleName]]['users'][] = $item['entry'];
         }
 
         return $out;
     }
 
     /**
-     * Rebuild a tracked user entry from its current DB values, preserving any
-     * non-value keys already present in the source (e.g. version). The password
-     * is never written out.
+     * Rebuild a tracked user entry from its full current DB state, dropping stale
+     * keys not backed by a current value and preserving any non-DB structural keys
+     * already present in the source (e.g. version). Null/empty values are skipped
+     * to keep the file clean. The password is never written out.
      *
-     * @param array $entry
-     * @param array $values Current DB values keyed by source field.
+     * @param array $entry Existing tracked source entry.
+     * @param mixed $user Loaded admin user model.
      * @return array
      */
-    private function refreshUserEntry(array $entry, array $values): array
+    private function refreshUserEntry(array $entry, $user): array
     {
-        unset($entry['password']);
+        // Reuse the full-export builder so a tracked user comes back with its
+        // complete current field set, not just the keys the source already lists.
+        $fresh = $this->userToEntry($user);
 
-        foreach ($values as $key => $value) {
-            if ($value !== null) {
-                $entry[$key] = $value;
+        // Carry over non-DB structural keys the source tracked (e.g. version),
+        // never the password.
+        foreach ($entry as $key => $value) {
+            if ($key === 'password' || array_key_exists($key, $fresh)) {
+                continue;
             }
+            // interface_locale is a DB-backed field handled by userToEntry; if the
+            // user no longer has one, drop it rather than preserving a stale value.
+            if ($key === 'interface_locale') {
+                continue;
+            }
+            $fresh[$key] = $value;
         }
 
-        return $entry;
+        return $fresh;
     }
 
     /**
@@ -353,11 +405,11 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
     }
 
     /**
-     * Load an admin user by email; null when none exists.
+     * Load an admin user model by email; null when none exists.
      *
-     * @return array|null Current values keyed by source field (no password), or null.
+     * @return mixed|null Loaded admin user model, or null.
      */
-    private function loadUserByEmail(string $email): ?array
+    private function loadUserByEmail(string $email)
     {
         $user = $this->userFactory->create()->getCollection()
             ->addFieldToFilter('email', $email)
@@ -367,7 +419,7 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
             return null;
         }
 
-        return $this->userToEntry($user);
+        return $user;
     }
 
     /**

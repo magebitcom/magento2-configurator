@@ -529,8 +529,11 @@ class Websites implements ComponentInterface, ExportableComponentInterface
 
     /**
      * Walk the tracked source structure and refresh each tracked website/group/
-     * store-view from the DB. Tracked entries whose record no longer exists are
-     * kept untouched. Non-value keys carried in the source are preserved.
+     * store-view from the DB. A tracked entity comes back with its FULL current
+     * field set (every scalar column with a value) — not just the keys the source
+     * file already listed — so admin changes to previously-untracked fields are
+     * captured. Tracked entries whose record no longer exists are kept untouched,
+     * and any non-DB structural keys carried in the source are preserved.
      *
      * @param array $existing
      * @return array
@@ -559,8 +562,9 @@ class Websites implements ComponentInterface, ExportableComponentInterface
     }
 
     /**
-     * Refresh a tracked website entry's scalar fields and its tracked store groups
-     * from the live website model, preserving the entry's existing key set.
+     * Refresh a tracked website entry, emitting every scalar field the live website
+     * model carries (skipping empties), preserving the entry's non-DB structural
+     * keys (e.g. version), and re-resolving the nested store groups from the DB.
      *
      * @param array $entry
      * @param Website $website
@@ -568,35 +572,48 @@ class Websites implements ComponentInterface, ExportableComponentInterface
      */
     private function refreshWebsiteEntry(array $entry, Website $website): array
     {
+        // Exclude internal/auto-increment ids and the redundant code (the YAML key)
+        // so the export stays portable across environments.
+        $refreshed = $this->scalarData($website->getData(), ['store_groups', 'website_id', 'default_group_id', 'code']);
+
+        // Preserve non-DB structural keys the source tracked (e.g. version).
         foreach ($entry as $key => $value) {
-            if ($key === 'store_groups' || is_array($value)) {
+            if ($key === 'store_groups' || array_key_exists($key, $refreshed)) {
                 continue;
             }
-            $current = $website->getData((string) $key);
-            if ($current !== null) {
-                $entry[$key] = $current;
+            if (is_array($value) || $website->getData((string) $key) !== null) {
+                continue;
             }
+            $refreshed[$key] = $value;
         }
 
+        // Re-resolve the nested store groups from the DB, refreshing each tracked
+        // group in place so its key/order is kept and untracked DB fields surface.
         if (isset($entry['store_groups']) && is_array($entry['store_groups'])) {
+            $groups = [];
             foreach ($entry['store_groups'] as $i => $groupEntry) {
                 if (!is_array($groupEntry)) {
+                    $groups[$i] = $groupEntry;
                     continue;
                 }
                 $group = $this->loadGroupForEntry($groupEntry, $website);
                 if ($group === null || !$group->getId()) {
+                    $groups[$i] = $groupEntry;
                     continue;
                 }
-                $entry['store_groups'][$i] = $this->refreshGroupEntry($groupEntry, $group);
+                $groups[$i] = $this->refreshGroupEntry($groupEntry, $group);
             }
+            $refreshed['store_groups'] = $groups;
         }
 
-        return $entry;
+        return $refreshed;
     }
 
     /**
-     * Refresh a tracked store-group entry's scalar fields and its tracked store
-     * views from the live group model, preserving the entry's existing key set.
+     * Refresh a tracked store-group entry, emitting every scalar field the live
+     * group model carries (skipping empties), preserving the entry's non-DB
+     * structural keys, re-resolving the `default_store` relation, and re-resolving
+     * the nested store views from the DB.
      *
      * @param array $entry
      * @param Group $group
@@ -604,42 +621,53 @@ class Websites implements ComponentInterface, ExportableComponentInterface
      */
     private function refreshGroupEntry(array $entry, Group $group): array
     {
+        $refreshed = $this->scalarData($group->getData(), ['store_views', 'default_store', 'website_id']);
+
+        // Preserve non-DB structural keys the source tracked (e.g. version).
         foreach ($entry as $key => $value) {
-            if ($key === 'store_views' || $key === 'default_store' || is_array($value)) {
+            if (in_array($key, ['store_views', 'default_store'], true) || array_key_exists($key, $refreshed)) {
                 continue;
             }
-            $current = $group->getData((string) $key);
-            if ($current !== null) {
-                $entry[$key] = $current;
+            if (is_array($value) || $group->getData((string) $key) !== null) {
+                continue;
             }
+            $refreshed[$key] = $value;
         }
 
-        if (array_key_exists('default_store', $entry)) {
-            $defaultStore = $group->getDefaultStore();
-            if ($defaultStore && $defaultStore->getId()) {
-                $entry['default_store'] = (string) $defaultStore->getCode();
-            }
+        // Re-resolve the default store relation from the DB.
+        $defaultStore = $group->getDefaultStore();
+        if ($defaultStore && $defaultStore->getId()) {
+            $refreshed['default_store'] = (string) $defaultStore->getCode();
+        } elseif (array_key_exists('default_store', $entry)) {
+            $refreshed['default_store'] = $entry['default_store'];
         }
 
+        // Re-resolve the nested store views from the DB.
         if (isset($entry['store_views']) && is_array($entry['store_views'])) {
+            $views = [];
             foreach ($entry['store_views'] as $viewCode => $viewEntry) {
                 if (!is_array($viewEntry)) {
+                    $views[$viewCode] = $viewEntry;
                     continue;
                 }
                 $storeView = $this->storeFactory->create();
                 $storeView->load((string) $viewCode, 'code');
                 if (!$storeView->getId()) {
+                    $views[$viewCode] = $viewEntry;
                     continue;
                 }
-                $entry['store_views'][$viewCode] = $this->refreshStoreViewEntry($viewEntry, $storeView);
+                $views[$viewCode] = $this->refreshStoreViewEntry($viewEntry, $storeView);
             }
+            $refreshed['store_views'] = $views;
         }
 
-        return $entry;
+        return $refreshed;
     }
 
     /**
-     * Refresh a tracked store-view entry's scalar fields from the live store model.
+     * Refresh a tracked store-view entry, emitting every scalar field the live
+     * store model carries (skipping empties), preserving the entry's non-DB
+     * structural keys.
      *
      * @param array $entry
      * @param Store $storeView
@@ -647,17 +675,45 @@ class Websites implements ComponentInterface, ExportableComponentInterface
      */
     private function refreshStoreViewEntry(array $entry, Store $storeView): array
     {
+        $refreshed = $this->scalarData($storeView->getData(), ['store_id', 'website_id', 'group_id', 'code']);
+
+        // Preserve non-DB structural keys the source tracked (e.g. version).
         foreach ($entry as $key => $value) {
-            if (is_array($value)) {
+            if (array_key_exists($key, $refreshed)) {
                 continue;
             }
-            $current = $storeView->getData((string) $key);
-            if ($current !== null) {
-                $entry[$key] = $current;
+            if (is_array($value) || $storeView->getData((string) $key) !== null) {
+                continue;
             }
+            $refreshed[$key] = $value;
         }
 
-        return $entry;
+        return $refreshed;
+    }
+
+    /**
+     * Reduce a model's raw data to its scalar columns that carry a value, keeping
+     * files clean: array values (sub-resources), null and empty-string values, and
+     * any explicitly excluded keys (relations rebuilt separately) are dropped.
+     *
+     * @param array $data
+     * @param string[] $exclude
+     * @return array
+     */
+    private function scalarData(array $data, array $exclude = []): array
+    {
+        $out = [];
+        foreach ($data as $key => $value) {
+            if (in_array((string) $key, $exclude, true) || is_array($value)) {
+                continue;
+            }
+            if ($value === null || $value === '') {
+                continue;
+            }
+            $out[(string) $key] = $value;
+        }
+
+        return $out;
     }
 
     /**
