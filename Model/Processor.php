@@ -272,7 +272,10 @@ class Processor
 
             // Loop through components and run them individually in the master.yaml order
             foreach ($master as $componentAlias => $componentConfig) {
-                if ($componentConfig['enabled'] === 0) {
+                if (isset($componentConfig['enabled']) && !$componentConfig['enabled']) {
+                    $this->log->logComment(
+                        sprintf("Skipping component '%s' as it is disabled (enabled: 0)", $componentAlias)
+                    );
                     continue;
                 }
                 // Run the component in question

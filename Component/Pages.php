@@ -26,9 +26,12 @@ use Magento\Framework\Escaper;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Framework\ObjectManagerInterface;
+use Magento\Framework\UrlInterface;
 use Magento\Store\Api\StoreRepositoryInterface;
+use Magento\Store\Model\App\Emulation;
 use Magento\Store\Model\Store;
 use Symfony\Component\Filesystem\Filesystem;
+use Magento\Framework\App\Area;
 use Magento\Framework\EntityManager\MetadataPool;
 
 /**
@@ -55,6 +58,7 @@ class Pages implements ComponentInterface
         private readonly ObjectManagerInterface $objectManager,
         private readonly ResourceConnection $resourceConnection,
         private readonly MetadataPool $metadataPool,
+        private readonly Emulation $emulation,
     ) {
         if (class_exists('Hyva\Theme\Model\ViewModelRegistry')) {
             $this->viewModelRegistry = $this->objectManager->create('Hyva\Theme\Model\ViewModelRegistry');
@@ -148,61 +152,86 @@ class Pages implements ComponentInterface
                 $this->checkRequiredFields($pageData);
                 $this->setDefaultFields($pageData);
 
-                // Loop through each attribute of the data array
-                foreach ($pageData as $key => $value) {
-                    // Check if content is from a file source
-                    if ($key == "source") {
-                        $key = 'content';
+                // Render store-scoped content (blocks, view models, config) under the target
+                // store so the saved content reflects that store rather than the admin default.
+                $emulationStarted = false;
+                if (!empty($pageData['stores']) && is_array($pageData['stores'])) {
+                    $firstStore = $this->storeRepository->get((string) reset($pageData['stores']));
+                    $this->emulation->startEnvironmentEmulation(
+                        (int) $firstStore->getId(),
+                        Area::AREA_FRONTEND,
+                        true
+                    );
+                    $emulationStarted = true;
+                }
 
-                        $file = BP . '/' . $value;
+                try {
+                    // Loop through each attribute of the data array
+                    foreach ($pageData as $key => $value) {
+                        // Check if content is from a file source
+                        if ($key == "source") {
+                            $key = 'content';
 
-                        if (!$this->filesystem->exists($file)) {
-                            return;
+                            $file = BP . '/' . $value;
+
+                            if (!$this->filesystem->exists($file)) {
+                                return;
+                            }
+
+                            // phpcs:disable
+                            ob_start();
+
+                            $dictionary = [
+                                'escaper' => $this->escaper,
+                                'viewModels' => $this->viewModelRegistry
+                            ];
+
+                            try {
+                                extract($dictionary, EXTR_SKIP);
+                                include $file;
+                            } catch (Exception $exception) {
+                                ob_end_clean();
+                                throw $exception;
+                            }
+
+                            $value = ob_get_clean();
+                            // phpcs:enable
                         }
 
-                        // phpcs:disable
-                        ob_start();
-
-                        $dictionary = [
-                            'escaper' => $this->escaper,
-                            'viewModels' => $this->viewModelRegistry
-                        ];
-
-                        try {
-                            extract($dictionary, EXTR_SKIP);
-                            include $file;
-                        } catch (Exception $exception) {
-                            ob_end_clean();
-                            throw $exception;
+                        // Skip stores
+                        if ($key == "stores") {
+                            continue;
                         }
 
-                        $value = ob_get_clean();
-                        // phpcs:enable
-                    }
-
-                    // Skip stores
-                    if ($key == "stores") {
-                        continue;
-                    }
-
-                    // Log the old value if any
-                    $this->log->logComment(sprintf(
-                        "Checking page %s, key %s => %s",
-                        $identifier . ' (' . $page->getId() . ')',
-                        $key,
-                        $page->getData($key)
-                    ), 1);
-
-                    // Check if there is a difference in value
-                    if ($page->getData($key) != $value) {
-                        $page->setData($key, $value);
-
-                        $this->log->logInfo(sprintf(
-                            "Set page %s, key %s => %s",
+                        // Log the old value if any
+                        $this->log->logComment(sprintf(
+                            "Checking page %s, key %s => %s",
                             $identifier . ' (' . $page->getId() . ')',
                             $key,
-                            $value
+                            $page->getData($key)
                         ), 1);
+
+                        // Check if there is a difference in value
+                        if ($page->getData($key) != $value) {
+                            $page->setData($key, $value);
+
+                            $this->log->logInfo(sprintf(
+                                "Set page %s, key %s => %s",
+                                $identifier . ' (' . $page->getId() . ')',
+                                $key,
+                                $value
+                            ), 1);
+                        }
+                    }
+                } finally {
+                    if ($emulationStarted) {
+                        $this->emulation->stopEnvironmentEmulation();
+
+                        // Reset the URL builder to clear base URLs cached during emulation.
+                        $urlBuilder = $this->objectManager->get(UrlInterface::class);
+                        if (method_exists($urlBuilder, '_resetState')) {
+                            $urlBuilder->_resetState();
+                        }
                     }
                 }
 
