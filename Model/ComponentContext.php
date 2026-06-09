@@ -37,7 +37,8 @@ class ComponentContext
         private readonly ComponentMode $mode,
         private readonly string $environment,
         private readonly bool $dryRun,
-        Closure $parser
+        Closure $parser,
+        private readonly ?int $version = null
     ) {
         $this->parser = $parser;
     }
@@ -75,5 +76,14 @@ class ComponentContext
     public function isDryRun(): bool
     {
         return $this->dryRun;
+    }
+
+    /**
+     * Component-level version declared in master.yaml (null when none). Used by
+     * bulk/imperative components for run-once-per-version behaviour.
+     */
+    public function getVersion(): ?int
+    {
+        return $this->version;
     }
 }

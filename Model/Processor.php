@@ -14,6 +14,7 @@ use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\ComponentListInterface;
 use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\VersionManagementInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
@@ -97,6 +98,11 @@ class Processor
     protected $runResult;
 
     /**
+     * @var VersionManagementInterface
+     */
+    protected $versionManagement;
+
+    /**
      * Processor constructor.
      * @param ComponentListInterface $componentList
      * @param State $state
@@ -108,7 +114,8 @@ class Processor
         LoggerInterface $logging,
         FullModuleList $fullModuleList,
         Dir $dir,
-        Manager $manager
+        Manager $manager,
+        VersionManagementInterface $versionManagement
     ) {
         $this->componentList = $componentList;
         $this->state = $state;
@@ -116,6 +123,7 @@ class Processor
         $this->fullModuleList = $fullModuleList;
         $this->dir = $dir;
         $this->manager = $manager;
+        $this->versionManagement = $versionManagement;
     }
 
     /**
@@ -315,70 +323,114 @@ class Processor
         $modeValue = $componentConfig['env'][$this->getEnvironment()]['mode'] ?? self::MODE_CREATE;
         $mode = ComponentMode::tryFrom((string) $modeValue) ?? ComponentMode::Create;
 
-        if (isset($componentConfig['sources'])) {
-            foreach ($componentConfig['sources'] as $source) {
+        // Optional component-level version: run the whole component once per version
+        // bump. Keyed in a distinct 'source_' namespace from per-entity version ids.
+        $sourceVersion = isset($componentConfig['version']) ? (int) $componentConfig['version'] : null;
+        $sourceVersionId = 'source_' . $componentAlias;
+        if ($sourceVersion !== null
+            && !$this->versionManagement->isNewVersion($sourceVersionId, $sourceVersion)
+        ) {
+            $this->log->logComment(
+                sprintf("Skipping '%s' - already at version %d", $componentAlias, $sourceVersion)
+            );
+            return;
+        }
+
+        // Only persist the source version if the component completes without a new
+        // failure, so a crashing run retries on the next deploy.
+        $errorsBefore = count($this->getRunResult()->getErrors());
+        $aborted = false;
+
+        try {
+            if (isset($componentConfig['sources'])) {
+                foreach ($componentConfig['sources'] as $source) {
+                    try {
+                        $this->executeComponentSource(
+                            $component,
+                            $componentAlias,
+                            $source,
+                            $sourceType,
+                            $mode,
+                            $sourceVersion
+                        );
+                    } catch (ComponentException $e) {
+                        if ($this->isIgnoreMissingFiles() === true) {
+                            $this->log->logInfo("Skipping file {$source} as it could not be found.");
+                            continue;
+                        }
+                        $aborted = true;
+                        throw $e;
+                    } catch (\Throwable $t) {
+                        $this->recordComponentFailure($componentAlias, $source, $t);
+                    }
+                }
+            }
+
+            // Check if there are environment specific nodes placed
+            if (!isset($componentConfig['env'])) {
+                // If not, continue to next component
+                $this->log->logComment(
+                    sprintf("No environment node for '%s' component", $componentAlias)
+                );
+                return;
+            }
+
+            // Check if there is a node for this particular environment
+            if (!isset($componentConfig['env'][$this->getEnvironment()])) {
+                // If not, continue to next component
+                $this->log->logComment(
+                    sprintf(
+                        "No '%s' environment specific node for '%s' component",
+                        $this->getEnvironment(),
+                        $componentAlias
+                    )
+                );
+                return;
+            }
+
+            // Check if there are sources for the environment
+            if (!isset($componentConfig['env'][$this->getEnvironment()]['sources'])) {
+                // If not continue
+                $this->log->logComment(
+                    sprintf(
+                        "No '%s' environment specific sources for '%s' component",
+                        $this->getEnvironment(),
+                        $componentAlias
+                    )
+                );
+                return;
+            }
+
+            // If there are sources for the environment, process them
+            foreach ((array) $componentConfig['env'][$this->getEnvironment()]['sources'] as $source) {
                 try {
-                    $this->executeComponentSource($component, $componentAlias, $source, $sourceType, $mode);
+                    $sourceType = (isset($componentConfig['type']) === true) ? $componentConfig['type'] : null;
+                    $this->executeComponentSource(
+                        $component,
+                        $componentAlias,
+                        $source,
+                        $sourceType,
+                        $mode,
+                        $sourceVersion
+                    );
                 } catch (ComponentException $e) {
                     if ($this->isIgnoreMissingFiles() === true) {
                         $this->log->logInfo("Skipping file {$source} as it could not be found.");
                         continue;
                     }
+                    $aborted = true;
                     throw $e;
                 } catch (\Throwable $t) {
                     $this->recordComponentFailure($componentAlias, $source, $t);
                 }
             }
-        }
-
-        // Check if there are environment specific nodes placed
-        if (!isset($componentConfig['env'])) {
-            // If not, continue to next component
-            $this->log->logComment(
-                sprintf("No environment node for '%s' component", $componentAlias)
-            );
-            return;
-        }
-
-        // Check if there is a node for this particular environment
-        if (!isset($componentConfig['env'][$this->getEnvironment()])) {
-            // If not, continue to next component
-            $this->log->logComment(
-                sprintf(
-                    "No '%s' environment specific node for '%s' component",
-                    $this->getEnvironment(),
-                    $componentAlias
-                )
-            );
-            return;
-        }
-
-        // Check if there are sources for the environment
-        if (!isset($componentConfig['env'][$this->getEnvironment()]['sources'])) {
-            // If not continue
-            $this->log->logComment(
-                sprintf(
-                    "No '%s' environment specific sources for '%s' component",
-                    $this->getEnvironment(),
-                    $componentAlias
-                )
-            );
-            return;
-        }
-
-        // If there are sources for the environment, process them
-        foreach ((array) $componentConfig['env'][$this->getEnvironment()]['sources'] as $source) {
-            try {
-                $sourceType = (isset($componentConfig['type']) === true) ? $componentConfig['type'] : null;
-                $this->executeComponentSource($component, $componentAlias, $source, $sourceType, $mode);
-            } catch (ComponentException $e) {
-                if ($this->isIgnoreMissingFiles() === true) {
-                    $this->log->logInfo("Skipping file {$source} as it could not be found.");
-                    continue;
-                }
-                throw $e;
-            } catch (\Throwable $t) {
-                $this->recordComponentFailure($componentAlias, $source, $t);
+        } finally {
+            if (!$aborted
+                && $sourceVersion !== null
+                && !$this->dryRun
+                && count($this->getRunResult()->getErrors()) === $errorsBefore
+            ) {
+                $this->versionManagement->setVersion($sourceVersionId, $sourceVersion);
             }
         }
     }
@@ -423,14 +475,16 @@ class Processor
         $componentAlias,
         $source,
         $sourceType,
-        ComponentMode $mode
+        ComponentMode $mode,
+        ?int $version = null
     ): void {
         $context = new ComponentContext(
             (string) $source,
             $mode,
             $this->getEnvironment(),
             $this->dryRun,
-            fn (string $path): array => $this->parseData($path, $sourceType)
+            fn (string $path): array => $this->parseData($path, $sourceType),
+            $version
         );
 
         $result = $component->execute($context);
