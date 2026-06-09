@@ -12,10 +12,12 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\ComponentMode;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Catalog\Model\Category;
@@ -31,10 +33,26 @@ use Magento\Store\Model\GroupFactory;
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
  */
-class Categories implements ComponentInterface
+class Categories implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'categories';
     private const DESCRIPTION = 'Component to import categories.';
+
+    /** Fields exported per category (name is emitted first, separately). */
+    private const EXPORT_FIELDS = [
+        'is_active',
+        'position',
+        'include_in_menu',
+        'description',
+        'page_layout',
+        'custom_use_parent_settings',
+        'url_key',
+        'display_mode',
+        'is_anchor',
+        'meta_title',
+        'meta_keywords',
+        'meta_description',
+    ];
 
     private array $mainAttributes = [
         'name',
@@ -262,6 +280,170 @@ class Categories implements ComponentInterface
             return $data['store_group'];
         }
         return 'Main Website Store';
+    }
+
+    /**
+     * Export the category tree(s) in the source format. Full mode dumps the whole
+     * tree under each store group's root; refresh re-exports each tracked
+     * top-level category as its FULL current subtree (so admin field changes and
+     * new sub-categories are captured), preserving non-exported keys (image,
+     * landing_page, version) from the tracked entry. Image/landing_page are not
+     * reverse-resolved.
+     */
+    public function export(ExportContext $context): array
+    {
+        if ($context->isFullExport()) {
+            return ['categories' => $this->exportAllGroups($context->getFilter())];
+        }
+
+        return ['categories' => $this->refreshTrackedGroups($context->getExistingData())];
+    }
+
+    /**
+     * @return array
+     */
+    private function exportAllGroups(?string $filter): array
+    {
+        $out = [];
+        foreach ($this->groupFactory->create()->getCollection() as $group) {
+            $name = (string) $group->getName();
+            if ($filter !== null && $filter !== '' && !str_starts_with($name, $filter)) {
+                continue;
+            }
+            try {
+                $root = $this->getDefaultCategory($name);
+            } catch (ComponentException $e) {
+                $this->log->logError($e->getMessage());
+                continue;
+            }
+            if (!$root) {
+                continue;
+            }
+            $out[] = ['store_group' => $name, 'categories' => $this->exportChildren((int) $root->getId())];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array $existing
+     * @return array
+     */
+    private function refreshTrackedGroups(array $existing): array
+    {
+        $entries = (isset($existing['categories']) && is_array($existing['categories'])) ? $existing['categories'] : [];
+
+        $out = [];
+        foreach ($entries as $groupEntry) {
+            if (!is_array($groupEntry)) {
+                $out[] = $groupEntry;
+                continue;
+            }
+
+            $groupName = $this->getStoreGroup($groupEntry);
+            try {
+                $root = $this->getDefaultCategory($groupName);
+            } catch (ComponentException $e) {
+                $this->log->logError($e->getMessage());
+                $out[] = $groupEntry;
+                continue;
+            }
+            if (!$root) {
+                $out[] = $groupEntry;
+                continue;
+            }
+
+            $categories = [];
+            foreach ($groupEntry['categories'] ?? [] as $tracked) {
+                if (!is_array($tracked) || !isset($tracked['name'])) {
+                    $categories[] = $tracked;
+                    continue;
+                }
+                $categoryId = $this->findChildByName((string) $tracked['name'], (int) $root->getId());
+                if ($categoryId === null) {
+                    // Category no longer exists; keep the tracked entry untouched.
+                    $categories[] = $tracked;
+                    continue;
+                }
+                $categories[] = $this->buildCategoryEntry($this->category->create()->load($categoryId), $tracked);
+            }
+
+            $rebuilt = $groupEntry;
+            $rebuilt['categories'] = $categories;
+            $out[] = $rebuilt;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Build a category's full source entry (name + value fields + recursive
+     * children). Keys from a tracked entry that aren't reverse-exported here
+     * (image, landing_page, version, …) are preserved.
+     *
+     * @param Category $category
+     * @param array $preserve
+     * @return array
+     */
+    private function buildCategoryEntry(Category $category, array $preserve = []): array
+    {
+        $entry = ['name' => (string) $category->getName()];
+
+        foreach (self::EXPORT_FIELDS as $field) {
+            $value = $category->getData($field);
+            if ($value === null || $value === '') {
+                continue;
+            }
+            $entry[$field] = $value;
+        }
+
+        // Preserve tracked keys we don't reverse (image, landing_page, version, …).
+        foreach ($preserve as $key => $value) {
+            if ($key === 'name' || $key === 'categories'
+                || array_key_exists($key, $entry)
+                || in_array($key, self::EXPORT_FIELDS, true)
+            ) {
+                continue;
+            }
+            $entry[$key] = $value;
+        }
+
+        $children = $this->exportChildren((int) $category->getId());
+        if ($children !== []) {
+            $entry['categories'] = $children;
+        }
+
+        return $entry;
+    }
+
+    /**
+     * @return array
+     */
+    private function exportChildren(int $parentId): array
+    {
+        $collection = $this->category->create()->getCollection()
+            ->addAttributeToSelect('*')
+            ->addFieldToFilter('parent_id', $parentId)
+            ->setOrder('position', 'ASC');
+
+        $out = [];
+        foreach ($collection as $child) {
+            $out[] = $this->buildCategoryEntry($child);
+        }
+
+        return $out;
+    }
+
+    private function findChildByName(string $name, int $parentId): ?int
+    {
+        $category = $this->category->create()->getCollection()
+            ->addAttributeToSelect('name')
+            ->addFieldToFilter('name', $name)
+            ->addFieldToFilter('parent_id', $parentId)
+            ->setPageSize(1)
+            ->getFirstItem();
+
+        return $category->getId() ? (int) $category->getId() : null;
     }
 
     public function getAlias(): string
