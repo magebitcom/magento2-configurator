@@ -353,19 +353,15 @@ class Attributes implements ComponentInterface, ExportableComponentInterface
                 continue;
             }
 
+            // A tracked attribute exports EVERYTHING about it (the full current
+            // field set + options), not just the keys already listed — so admin
+            // changes to previously-untracked fields aren't lost. Non-DB
+            // structural keys the source tracked (e.g. version) are preserved.
             $full = $this->buildExportEntry((string) $code, $attributeArray);
-            foreach ($entry as $key => $ignored) {
-                if ($key === 'option') {
-                    if (isset($full['option'])) {
-                        $entry['option'] = $full['option'];
-                    }
-                    continue;
-                }
-                if (array_key_exists($key, $full)) {
-                    $entry[$key] = $full[$key];
-                }
+            if (array_key_exists('version', $entry) && !array_key_exists('version', $full)) {
+                $full['version'] = $entry['version'];
             }
-            $out[$code] = $entry;
+            $out[$code] = $full;
         }
 
         return [$node => $out];
