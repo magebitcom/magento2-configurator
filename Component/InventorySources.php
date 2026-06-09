@@ -11,17 +11,22 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Framework\Api\SearchCriteriaBuilder;
 use Magento\Framework\Exception\NoSuchEntityException;
+use Magento\InventoryApi\Api\Data\SourceInterface;
 use Magento\InventoryApi\Api\Data\SourceInterfaceFactory;
+use Magento\InventoryApi\Api\Data\StockInterface;
 use Magento\InventoryApi\Api\Data\StockInterfaceFactory;
 use Magento\InventoryApi\Api\Data\StockSourceLinkInterfaceFactory;
+use Magento\InventoryApi\Api\GetSourcesAssignedToStockOrderedByPriorityInterface;
 use Magento\InventoryApi\Api\SourceRepositoryInterface;
 use Magento\InventoryApi\Api\StockRepositoryInterface;
 use Magento\InventoryApi\Api\StockSourceLinksSaveInterface;
@@ -36,7 +41,7 @@ use Magento\InventorySalesApi\Api\Data\SalesChannelInterfaceFactory;
  *
  * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
  */
-class InventorySources implements ComponentInterface
+class InventorySources implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'inventory_sources';
     private const DESCRIPTION = 'Component to create/maintain MSI sources, stocks and their links.';
@@ -51,7 +56,8 @@ class InventorySources implements ComponentInterface
         private readonly SalesChannelInterfaceFactory $salesChannelFactory,
         private readonly SearchCriteriaBuilder $searchCriteriaBuilder,
         private readonly LoggerInterface $log,
-        private readonly ReconciliationGate $gate
+        private readonly ReconciliationGate $gate,
+        private readonly GetSourcesAssignedToStockOrderedByPriorityInterface $sourcesAssignedToStock
     ) {
     }
 
@@ -257,6 +263,178 @@ class InventorySources implements ComponentInterface
         } catch (\Exception $e) {
             $this->log->logError(sprintf('Failed to link sources to stock "%s": %s', $stockName, $e->getMessage()));
         }
+    }
+
+    /**
+     * Export the current MSI topology into the source format. Refresh mode rewrites
+     * only the sources/stocks already tracked in the source file (preserving their
+     * non-value keys such as `version`, and keeping entries whose entity no longer
+     * exists in the DB untouched); full mode dumps every source and stock, optionally
+     * filtered by a source-code / stock-name prefix.
+     */
+    public function export(ExportContext $context): array
+    {
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData());
+    }
+
+    /**
+     * @param array $existing
+     * @return array
+     */
+    private function refreshTracked(array $existing): array
+    {
+        $out = [];
+
+        if (isset($existing['sources']) && is_array($existing['sources'])) {
+            foreach ($existing['sources'] as $code => $entry) {
+                $entry = (array) $entry;
+                $source = $this->findSource((string) $code);
+                $out['sources'][$code] = $source === null
+                    ? $entry
+                    : $this->mergeSource($entry, $source);
+            }
+        }
+
+        if (isset($existing['stocks']) && is_array($existing['stocks'])) {
+            foreach ($existing['stocks'] as $name => $entry) {
+                $entry = (array) $entry;
+                $stock = $this->findStockByName((string) $name);
+                $out['stocks'][$name] = $stock === null
+                    ? $entry
+                    : $this->mergeStock($entry, $stock);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        $out = [];
+
+        $sources = $this->sourceRepository->getList($this->searchCriteriaBuilder->create())->getItems();
+        foreach ($sources as $source) {
+            $code = (string) $source->getSourceCode();
+            if ($filter !== null && $filter !== '' && !str_starts_with($code, $filter)) {
+                continue;
+            }
+            $out['sources'][$code] = $this->mergeSource([], $source);
+        }
+
+        $stocks = $this->stockRepository->getList($this->searchCriteriaBuilder->create())->getItems();
+        foreach ($stocks as $stock) {
+            $name = (string) $stock->getName();
+            if ($filter !== null && $filter !== '' && !str_starts_with($name, $filter)) {
+                continue;
+            }
+            $out['stocks'][$name] = $this->mergeStock([], $stock);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Rebuild a source entry from its current DB columns. Preserves any non-column
+     * keys already tracked (e.g. `version`); `source_code` is implied by the map key
+     * and is not written into the entry.
+     *
+     * @param array $entry
+     * @param SourceInterface $source
+     * @return array
+     */
+    private function mergeSource(array $entry, SourceInterface $source): array
+    {
+        $columns = $source->getData();
+        unset($columns[SourceInterface::SOURCE_CODE]);
+
+        $version = $entry['version'] ?? null;
+        $merged = $columns;
+        if ($version !== null) {
+            $merged['version'] = $version;
+        }
+
+        return $merged;
+    }
+
+    /**
+     * Rebuild a stock entry from the DB: its current column data plus the linked
+     * source codes (ordered by priority) and the website sales-channel codes.
+     * Preserves any tracked `version`; `name` is implied by the map key.
+     *
+     * @param array $entry
+     * @param StockInterface $stock
+     * @return array
+     */
+    private function mergeStock(array $entry, StockInterface $stock): array
+    {
+        $columns = $stock->getData();
+        unset($columns[StockInterface::NAME], $columns[StockInterface::STOCK_ID], $columns['extension_attributes']);
+
+        $merged = $columns;
+
+        $sources = $this->stockSourceCodes((int) $stock->getStockId());
+        if ($sources !== []) {
+            $merged['sources'] = $sources;
+        }
+
+        $channels = $this->stockSalesChannelCodes($stock);
+        if ($channels !== []) {
+            $merged['sales_channels'] = $channels;
+        }
+
+        $version = $entry['version'] ?? null;
+        if ($version !== null) {
+            $merged['version'] = $version;
+        }
+
+        return $merged;
+    }
+
+    /**
+     * Source codes linked to a stock, ordered by link priority (matching the order
+     * the component writes them back).
+     *
+     * @param int $stockId
+     * @return string[]
+     */
+    private function stockSourceCodes(int $stockId): array
+    {
+        $codes = [];
+        foreach ($this->sourcesAssignedToStock->execute($stockId) as $source) {
+            $codes[] = (string) $source->getSourceCode();
+        }
+
+        return $codes;
+    }
+
+    /**
+     * Website codes for the stock's assigned sales channels (extension attributes).
+     *
+     * @param StockInterface $stock
+     * @return string[]
+     */
+    private function stockSalesChannelCodes(StockInterface $stock): array
+    {
+        $extension = $stock->getExtensionAttributes();
+        $channels = $extension !== null ? $extension->getSalesChannels() : null;
+        if (!is_array($channels)) {
+            return [];
+        }
+
+        $codes = [];
+        foreach ($channels as $channel) {
+            if ($channel->getType() === SalesChannelInterface::TYPE_WEBSITE) {
+                $codes[] = (string) $channel->getCode();
+            }
+        }
+
+        return $codes;
     }
 
     public function getAlias(): string

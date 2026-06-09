@@ -11,10 +11,12 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Cms\Api\BlockRepositoryInterface;
@@ -32,7 +34,7 @@ use Magento\Framework\Module\Manager as ModuleManager;
  * `hyva_commerce_cms_block` table, and no-ops when the module is absent. Can
  * auto-create the backing CMS block.
  */
-class HyvaBlocks implements ComponentInterface
+class HyvaBlocks implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'hyva_blocks';
     private const DESCRIPTION = 'Component to create/maintain Hyvä CMS block content (requires Hyva_CmsMagento).';
@@ -372,6 +374,157 @@ class HyvaBlocks implements ComponentInterface
             'creation_time' => $connection->getDateFunction(),
             'update_time' => $connection->getDateFunction(),
         ]);
+    }
+
+    /**
+     * Export current Hyvä CMS block content into the source format. Refresh mode
+     * rewrites only the block identifiers already tracked in the source file;
+     * full mode dumps every `hyva_commerce_cms_block` row joined to its CMS block
+     * identifier (optionally filtered by an identifier prefix). No-ops to an empty
+     * array when the optional Hyvä module is absent.
+     */
+    public function export(ExportContext $context): array
+    {
+        if (!$this->moduleManager->isEnabled(self::HYVA_MODULE)) {
+            $this->log->logComment(sprintf('%s is not installed; skipping Hyvä CMS blocks export.', self::HYVA_MODULE));
+            return [];
+        }
+
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData(), $context->getFilter());
+    }
+
+    /**
+     * Refresh each tracked block from the DB, preserving non-value keys (version,
+     * auto_create_block, block_title, …). Identifiers that don't match the filter,
+     * or no longer exist in the DB, are kept untouched.
+     *
+     * @param array $existing
+     * @param string|null $filter
+     * @return array
+     */
+    private function refreshTracked(array $existing, ?string $filter): array
+    {
+        $out = [];
+        foreach ($existing as $identifier => $entry) {
+            $entry = (array) $entry;
+
+            if ($filter !== null && $filter !== '' && !str_starts_with((string) $identifier, $filter)) {
+                $out[$identifier] = $entry;
+                continue;
+            }
+
+            $cmsBlockId = $this->findCmsBlockId((string) $identifier);
+            $row = $cmsBlockId !== null ? $this->loadExisting($cmsBlockId) : false;
+            if ($cmsBlockId === null || $row === false) {
+                $out[$identifier] = $entry;
+                continue;
+            }
+
+            $out[$identifier] = $this->applyCurrentValues($entry, $row, $cmsBlockId);
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        $connection = $this->resourceConnection->getConnection();
+        $select = $connection->select()
+            ->from(['h' => $this->resourceConnection->getTableName(self::TABLE)], ['cms_block_id'])
+            ->join(
+                ['b' => $this->resourceConnection->getTableName('cms_block')],
+                'b.block_id = h.cms_block_id',
+                ['identifier']
+            );
+
+        if ($filter !== null && $filter !== '') {
+            $select->where('b.identifier LIKE ?', $filter . '%');
+        }
+
+        $out = [];
+        foreach ($connection->fetchAll($select) as $row) {
+            $identifier = (string) $row['identifier'];
+            $cmsBlockId = (int) $row['cms_block_id'];
+            $hyvaRow = $this->loadExisting($cmsBlockId);
+            if ($hyvaRow === false) {
+                continue;
+            }
+            $out[$identifier] = $this->applyCurrentValues([], $hyvaRow, $cmsBlockId);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Build/refresh a single entry's exported values from the Hyvä content row,
+     * preserving any pre-existing non-value keys carried in from the source file.
+     *
+     * @param array<string, mixed> $entry
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function applyCurrentValues(array $entry, array $row, int $cmsBlockId): array
+    {
+        $draft = (string) ($row['draft_content'] ?? '');
+        $published = (string) ($row['published_content'] ?? '');
+
+        // Drop any input variants so the exported entry is unambiguous, then write
+        // the current draft/published content back. When both sides are identical
+        // we collapse to a single `content` key (mirrors execute()'s shared path).
+        unset(
+            $entry['content'],
+            $entry['content_source'],
+            $entry['draft_content'],
+            $entry['draft_content_source'],
+            $entry['published_content'],
+            $entry['published_content_source']
+        );
+
+        if ($draft === $published) {
+            $entry['content'] = $draft;
+        } else {
+            $entry['draft_content'] = $draft;
+            $entry['published_content'] = $published;
+        }
+
+        $entry['is_liveview_enabled'] = (int) ($row['is_liveview_enabled'] ?? 0) === 1;
+        $entry['store_ids'] = $this->loadBlockStoreIds($cmsBlockId);
+
+        return $entry;
+    }
+
+    /**
+     * Read the store associations for a CMS block from `cms_block_store`, keyed by
+     * the entity link field (`row_id` under staging, `block_id` otherwise).
+     *
+     * @return int[]
+     */
+    private function loadBlockStoreIds(int $blockId): array
+    {
+        $connection = $this->resourceConnection->getConnection();
+        $blockTable = $this->resourceConnection->getTableName('cms_block');
+        $storeTable = $this->resourceConnection->getTableName('cms_block_store');
+
+        $linkField = $connection->tableColumnExists($blockTable, 'row_id') ? 'row_id' : 'block_id';
+        $linkId = (int) $connection->fetchOne(
+            $connection->select()->from($blockTable, [$linkField])->where('block_id = ?', $blockId)->limit(1)
+        );
+        if ($linkId === 0) {
+            return [0];
+        }
+
+        $storeIds = array_map('intval', $connection->fetchCol(
+            $connection->select()->from($storeTable, ['store_id'])->where($linkField . ' = ?', $linkId)
+        ));
+        sort($storeIds);
+
+        return $storeIds === [] ? [0] : $storeIds;
     }
 
     public function getAlias(): string

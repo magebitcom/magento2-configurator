@@ -12,6 +12,8 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\ComponentMode;
+use Magebit\Configurator\Api\ExportableComponentInterface;
+use Magento\Integration\Model\Integration as IntegrationModel;
 use Magento\Integration\Model\IntegrationFactory;
 use Magento\Integration\Model\Oauth\TokenFactory;
 use Magento\Integration\Model\ResourceModel\Oauth\Token as TokenResource;
@@ -22,13 +24,14 @@ use Magento\Integration\Api\IntegrationServiceInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
  */
-class ApiIntegrations implements ComponentInterface
+class ApiIntegrations implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'apiintegrations';
     private const DESCRIPTION = 'Component to create Api Integrations';
@@ -164,6 +167,113 @@ class ApiIntegrations implements ComponentInterface
         $token->createVerifierToken($consumerId);
         $token->setType('access');
         $this->tokenResource->save($token);
+    }
+
+    /**
+     * Export current API integrations into the source format. Refresh mode rewrites
+     * only the integrations already tracked in the source file (matched by name);
+     * full mode dumps every integration (optionally filtered by a name prefix). Only
+     * metadata and granted ACL resources are written — access tokens, consumer keys
+     * and secrets are NEVER exported.
+     */
+    public function export(ExportContext $context): array
+    {
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData());
+    }
+
+    /**
+     * Rebuild the tracked entries from current DB state, matched by name. Preserves
+     * non-value keys (e.g. version) and keeps entries whose integration no longer
+     * exists unchanged.
+     *
+     * @param array $existing
+     * @return array
+     */
+    private function refreshTracked(array $existing): array
+    {
+        $entries = $existing['apiintegrations'] ?? null;
+        if (!is_array($entries)) {
+            return $existing;
+        }
+
+        $out = [];
+        foreach ($entries as $entry) {
+            $name = $entry['name'] ?? null;
+            if ($name === null) {
+                $out[] = $entry;
+                continue;
+            }
+
+            $integration = $this->findByName((string) $name);
+            if ($integration === null) {
+                // Tracked integration no longer exists — keep the entry untouched.
+                $out[] = $entry;
+                continue;
+            }
+
+            $out[] = $this->mergeIntegrationData($entry, $integration);
+        }
+
+        return ['apiintegrations' => $out];
+    }
+
+    /**
+     * Export all integrations in the source format, optionally filtered by a name prefix.
+     *
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        $collection = $this->integrationFactory->create()->getCollection();
+        if ($filter !== null && $filter !== '') {
+            $collection->addFieldToFilter('name', ['like' => $filter . '%']);
+        }
+
+        $out = [];
+        foreach ($collection as $integration) {
+            $out[] = $this->buildEntry($integration);
+        }
+
+        return ['apiintegrations' => $out];
+    }
+
+    /**
+     * Merge current DB metadata/resources into an existing tracked entry, preserving
+     * any other keys already present (e.g. version, setuptype).
+     */
+    private function mergeIntegrationData(array $entry, IntegrationModel $integration): array
+    {
+        return array_merge($entry, $this->buildEntry($integration));
+    }
+
+    /**
+     * Build a single source-format entry from an integration. Tokens and secrets are
+     * never read or written.
+     */
+    private function buildEntry(IntegrationModel $integration): array
+    {
+        return [
+            'name' => (string) $integration->getName(),
+            'email' => (string) $integration->getEmail(),
+            'callbackurl' => (string) $integration->getEndpoint(),
+            'identityurl' => (string) $integration->getIdentityLinkUrl(),
+            'resources' => $this->integrationService->getSelectedResources((int) $integration->getId()),
+        ];
+    }
+
+    /**
+     * Find an integration by its (unique) name, or null if none exists.
+     */
+    private function findByName(string $name): ?IntegrationModel
+    {
+        $integration = $this->integrationFactory->create()->getCollection()
+            ->addFieldToFilter('name', $name)
+            ->getFirstItem();
+
+        return $integration->getId() ? $integration : null;
     }
 
     public function getAlias(): string

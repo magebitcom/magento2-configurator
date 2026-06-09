@@ -12,11 +12,13 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\ComponentMode;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
 use Exception;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Cms\Api\BlockRepositoryInterface;
@@ -29,7 +31,7 @@ use Magento\Framework\ObjectManagerInterface;
 use Magento\Store\Model\Store;
 use Symfony\Component\Filesystem\Filesystem;
 
-class Blocks implements ComponentInterface
+class Blocks implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'blocks';
     private const DESCRIPTION = 'Component to create/maintain blocks.';
@@ -309,6 +311,160 @@ class Blocks implements ComponentInterface
         }
 
         return $store;
+    }
+
+    /**
+     * Export CMS blocks into the source format. Refresh mode rewrites only the
+     * identifiers already tracked in the source file, re-reading their current
+     * title/content/is_active from `cms_block` while preserving structural keys
+     * (version, source, stores). Full mode dumps every block (optionally filtered
+     * by an identifier prefix).
+     */
+    public function export(ExportContext $context): array
+    {
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData());
+    }
+
+    /**
+     * Rebuild the tracked structure, refreshing each definition's DB-backed
+     * fields from the current `cms_block` row. Definitions whose block can no
+     * longer be found in the DB are kept unchanged.
+     *
+     * @param array $existing
+     * @return array
+     */
+    private function refreshTracked(array $existing): array
+    {
+        $out = [];
+        foreach ($existing as $identifier => $blockData) {
+            if (!is_array($blockData) || !isset($blockData['block']) || !is_array($blockData['block'])) {
+                $out[$identifier] = $blockData;
+                continue;
+            }
+
+            $definitions = [];
+            foreach ($blockData['block'] as $definition) {
+                $definitions[] = is_array($definition)
+                    ? $this->refreshDefinition((string) $identifier, $definition)
+                    : $definition;
+            }
+
+            $rebuilt = $blockData;
+            $rebuilt['block'] = $definitions;
+            $out[$identifier] = $rebuilt;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Refresh a single block definition's DB-backed values, preserving any other
+     * keys (version, source, stores). When the entry uses a `source` template the
+     * `content` is left to the template file and not overwritten from the DB.
+     *
+     * @param string $identifier
+     * @param array $definition
+     * @return array
+     */
+    private function refreshDefinition(string $identifier, array $definition): array
+    {
+        $stores = (isset($definition['stores']) && is_array($definition['stores'])) ? $definition['stores'] : [];
+        $block = $this->loadBlock($identifier, $stores);
+        if ($block === null) {
+            return $definition;
+        }
+
+        $definition['title'] = $block->getTitle();
+        $definition['is_active'] = (int) $block->getIsActive();
+        if (!isset($definition['source'])) {
+            $definition['content'] = $block->getContent();
+        }
+
+        return $definition;
+    }
+
+    /**
+     * Dump every CMS block into the source format, one entry per block grouped by
+     * identifier. Content is exported inline. Store codes are resolved from the
+     * block's store ids; default scope (store id 0) yields no `stores` key.
+     *
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        $collection = $this->blockFactory->create()->getCollection();
+        if ($filter !== null && $filter !== '') {
+            $collection->addFieldToFilter('identifier', ['like' => $filter . '%']);
+        }
+
+        $out = [];
+        foreach ($collection as $block) {
+            $identifier = (string) $block->getIdentifier();
+            $definition = [
+                'title' => $block->getTitle(),
+                'content' => $block->getContent(),
+                'is_active' => (int) $block->getIsActive(),
+            ];
+
+            $codes = $this->resolveStoreCodes($block->getStoreId());
+            if ($codes !== []) {
+                $definition['stores'] = $codes;
+            }
+
+            $out[$identifier]['block'][] = $definition;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Load the single CMS block for an identifier, narrowing by the first store
+     * code when stores are specified (mirroring getBlockToProcess()).
+     *
+     * @param string $identifier
+     * @param array $stores
+     * @return Block|null
+     * @throws LocalizedException
+     */
+    private function loadBlock(string $identifier, array $stores): ?Block
+    {
+        if (count($stores) > 0) {
+            $store = $this->getStoreByCode((string) $stores[0]);
+            $blocks = $this->blockFactory->create()->getCollection()
+                ->addStoreFilter($store, false)
+                ->addFieldToFilter('identifier', $identifier);
+        } else {
+            $blocks = $this->blockFactory->create()->getCollection()
+                ->addFieldToFilter('identifier', $identifier);
+        }
+
+        return $blocks->count() ? $blocks->getFirstItem() : null;
+    }
+
+    /**
+     * Resolve a block's store ids to store codes, dropping the default scope
+     * (store id 0), which is represented by the absence of a `stores` key.
+     *
+     * @param mixed $storeIds
+     * @return array
+     */
+    private function resolveStoreCodes(mixed $storeIds): array
+    {
+        $codes = [];
+        foreach ((array) $storeIds as $storeId) {
+            if ((int) $storeId === Store::DEFAULT_STORE_ID) {
+                continue;
+            }
+            $store = $this->storeManager->load((int) $storeId);
+            if ($store->getId()) {
+                $codes[] = (string) $store->getCode();
+            }
+        }
+
+        return $codes;
     }
 
     public function getAlias(): string

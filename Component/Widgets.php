@@ -12,10 +12,12 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\ComponentMode;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Cms\Api\BlockRepositoryInterface;
@@ -31,7 +33,7 @@ use Magento\Widget\Model\ResourceModel\Widget\Instance\Collection as WidgetColle
 use Magento\Widget\Model\Widget\Instance;
 use Magento\Widget\Model\Widget\InstanceFactory as WidgetInstanceFactory;
 
-class Widgets implements ComponentInterface
+class Widgets implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'widgets';
     private const DESCRIPTION = 'Component to manage CMS Widgets';
@@ -425,6 +427,223 @@ class Widgets implements ComponentInterface
                     'template' => $pageGroup['template'] ?? '',
                     'entities' => $pageGroup['entities'] ?? '',
                 ],
+            ];
+        }
+
+        return $built;
+    }
+
+    /**
+     * Export current widget instances into the source format. Refresh mode
+     * rewrites only the widgets already tracked in the source file (matched by
+     * instance_type + title); full mode dumps every widget instance, optionally
+     * filtered by an instance_type prefix. The forward transforms applied by
+     * execute() are reversed: widget_parameters (serialized) -> `parameters`,
+     * theme_id -> `theme` code, store_ids -> `stores` codes, and the native
+     * page_groups rows -> the simplified list buildPageGroups() consumes.
+     */
+    public function export(ExportContext $context): array
+    {
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData());
+    }
+
+    /**
+     * Rebuild each tracked entry from its current DB state, preserving any
+     * non-value keys (e.g. version). A tracked widget that no longer exists in
+     * the DB is kept unchanged.
+     *
+     * @param array $existing
+     * @return array
+     */
+    private function refreshTracked(array $existing): array
+    {
+        $out = [];
+        foreach ($existing as $entry) {
+            if (!is_array($entry) || !isset($entry['instance_type'], $entry['title'])) {
+                $out[] = $entry;
+                continue;
+            }
+
+            $widget = $this->findWidgetByInstanceTypeAndTitle(
+                (string) $entry['instance_type'],
+                (string) $entry['title']
+            );
+            if ($widget === null) {
+                $out[] = $entry;
+                continue;
+            }
+
+            $out[] = $this->buildEntry($this->loadInstance((int) $widget->getId()), $entry);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Dump every widget instance, optionally filtered by an instance_type
+     * prefix (or, failing that, an exact instance_type match).
+     *
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        $out = [];
+        foreach ($this->widgetCollection as $widget) {
+            $instanceType = (string) $widget->getInstanceType();
+            if ($filter !== null && $filter !== '' && !str_starts_with($instanceType, $filter)) {
+                continue;
+            }
+
+            $out[] = $this->buildEntry($this->loadInstance((int) $widget->getId()));
+        }
+
+        return $out;
+    }
+
+    /**
+     * Load a fully hydrated widget instance (the collection items don't carry
+     * the page_groups rows, which are populated by the resource model on load).
+     */
+    private function loadInstance(int $instanceId): Instance
+    {
+        /** @var Instance $instance */
+        $instance = $this->widgetFactory->create();
+        $this->widgetResource->load($instance, $instanceId);
+
+        return $instance;
+    }
+
+    /**
+     * Build a single source-format entry from a loaded widget instance,
+     * preserving any non-value keys (e.g. version) from the tracked entry.
+     *
+     * @param Instance $widget
+     * @param array $existing
+     * @return array
+     */
+    private function buildEntry(Instance $widget, array $existing = []): array
+    {
+        $entry = [
+            'instance_type' => (string) $widget->getInstanceType(),
+            'title' => (string) $widget->getTitle(),
+        ];
+
+        $themeCode = $this->getThemeCode((int) $widget->getThemeId());
+        if ($themeCode !== null) {
+            $entry['theme'] = $themeCode;
+        }
+
+        $stores = $this->getStoreCodes((string) $widget->getData('store_ids'));
+        if ($stores !== []) {
+            $entry['stores'] = $stores;
+        }
+
+        $parameters = $this->getParameters($widget->getData('widget_parameters'));
+        if ($parameters !== []) {
+            $entry['parameters'] = $parameters;
+        }
+
+        $pageGroups = $this->getPageGroups($widget->getData('page_groups'));
+        if ($pageGroups !== []) {
+            $entry['page_groups'] = $pageGroups;
+        }
+
+        if (isset($existing['version'])) {
+            $entry['version'] = $existing['version'];
+        }
+
+        return $entry;
+    }
+
+    /**
+     * Resolve theme_id back to its theme code (e.g. `Magento/blank`).
+     */
+    private function getThemeCode(int $themeId): ?string
+    {
+        if ($themeId <= 0) {
+            return null;
+        }
+
+        $collection = $this->themeCollection->create();
+        $theme = $collection->addFieldToFilter('theme_id', $themeId)->getFirstItem();
+
+        return $theme->getId() ? (string) $theme->getData('code') : null;
+    }
+
+    /**
+     * Resolve a comma-separated store_ids string back to store-view codes.
+     *
+     * @param string $storeIds
+     * @return array
+     */
+    private function getStoreCodes(string $storeIds): array
+    {
+        $codes = [];
+        foreach (array_filter(explode(',', $storeIds), 'strlen') as $storeId) {
+            // Store id 0 is the "all store views" / admin scope; not a real code.
+            if ((int) $storeId === 0) {
+                continue;
+            }
+            $store = $this->storeFactory->create();
+            $store->load((int) $storeId);
+            if ($store->getId()) {
+                $codes[] = (string) $store->getCode();
+            }
+        }
+
+        return $codes;
+    }
+
+    /**
+     * Reverse the widget_parameters transform: unserialize the stored value
+     * into the `parameters` map.
+     *
+     * @param mixed $widgetParameters
+     * @return array
+     */
+    private function getParameters(mixed $widgetParameters): array
+    {
+        if (is_array($widgetParameters)) {
+            return $widgetParameters;
+        }
+        if (!is_string($widgetParameters) || $widgetParameters === '') {
+            return [];
+        }
+
+        $parameters = $this->serializer->unserialize($widgetParameters);
+
+        return is_array($parameters) ? $parameters : [];
+    }
+
+    /**
+     * Reverse buildPageGroups(): turn the native page_groups rows
+     * (widget_instance_page) back into the simplified configurator list.
+     *
+     * @param mixed $pageGroups
+     * @return array
+     */
+    private function getPageGroups(mixed $pageGroups): array
+    {
+        if (!is_array($pageGroups)) {
+            return [];
+        }
+
+        $built = [];
+        foreach ($pageGroups as $pageGroup) {
+            if (!is_array($pageGroup)) {
+                continue;
+            }
+            $built[] = [
+                'page_group' => (string) ($pageGroup['group'] ?? 'all_pages'),
+                'block' => (string) ($pageGroup['block_reference'] ?? ''),
+                'layout_handle' => (string) ($pageGroup['layout_handle'] ?? 'default'),
+                'for' => (string) ($pageGroup['for'] ?? 'all'),
+                'template' => (string) ($pageGroup['template'] ?? ''),
+                'page_id' => (string) ($pageGroup['page_id'] ?? '0'),
+                'entities' => (string) ($pageGroup['entities'] ?? ''),
             ];
         }
 
