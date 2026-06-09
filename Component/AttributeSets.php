@@ -12,22 +12,26 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\ComponentMode;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Api\ReconciliationOutcome;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Eav\Api\AttributeSetRepositoryInterface;
 use Magento\Catalog\Model\Product;
 use Magento\Eav\Api\Data\AttributeSetInterface;
+use Magento\Eav\Model\Config as EavConfig;
 use Magento\Eav\Setup\EavSetup;
+use Magento\Framework\App\ResourceConnection;
 
 /**
  * @SuppressWarnings(PHPMD.LongVariable)
  */
-class AttributeSets implements ComponentInterface
+class AttributeSets implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'attribute_sets';
     private const DESCRIPTION = 'Component to create/maintain attribute sets.';
@@ -36,7 +40,9 @@ class AttributeSets implements ComponentInterface
         private readonly EavSetup $eavSetup,
         private readonly AttributeSetRepositoryInterface $attributeSetRepository,
         private readonly LoggerInterface $log,
-        private readonly ReconciliationGate $gate
+        private readonly ReconciliationGate $gate,
+        private readonly ResourceConnection $resourceConnection,
+        private readonly EavConfig $eavConfig
     ) {
     }
 
@@ -208,6 +214,146 @@ class AttributeSets implements ComponentInterface
         }
 
         throw new ComponentException((string) __('Could not find attribute set name.'));
+    }
+
+    /**
+     * Export attribute sets with their groups and the USER-DEFINED attributes
+     * assigned to each group (system/inherited attributes are skipped — they come
+     * from the skeleton and would be huge, non-portable noise). Refresh re-exports
+     * the tracked sets (preserving `inherit`, which cannot be reversed, and
+     * `version`); full mode exports every set (optional name-prefix filter).
+     */
+    public function export(ExportContext $context): array
+    {
+        $sets = $this->fetchSets($context->getFilter());
+
+        if ($context->isFullExport()) {
+            $out = [];
+            foreach ($sets as $setId => $setName) {
+                $out[] = $this->buildSetEntry($setId, $setName, []);
+            }
+            return ['attribute_sets' => $out];
+        }
+
+        $existing = $context->getExistingData();
+        $tracked = (isset($existing['attribute_sets']) && is_array($existing['attribute_sets']))
+            ? $existing['attribute_sets']
+            : [];
+        $idByName = array_flip($sets);
+
+        $out = [];
+        foreach ($tracked as $entry) {
+            if (!is_array($entry) || !isset($entry['name'])) {
+                $out[] = $entry;
+                continue;
+            }
+            $name = (string) $entry['name'];
+            if (!isset($idByName[$name])) {
+                // Set no longer exists; keep the tracked entry untouched.
+                $out[] = $entry;
+                continue;
+            }
+            $out[] = $this->buildSetEntry((int) $idByName[$name], $name, $entry);
+        }
+
+        return ['attribute_sets' => $out];
+    }
+
+    /**
+     * @return array<int, string> attribute_set_id => name, for the product entity.
+     */
+    private function fetchSets(?string $filter): array
+    {
+        $entityTypeId = (int) $this->eavConfig->getEntityType(Product::ENTITY)->getId();
+        $connection = $this->resourceConnection->getConnection();
+        $select = $connection->select()
+            ->from(
+                $this->resourceConnection->getTableName('eav_attribute_set'),
+                ['attribute_set_id', 'attribute_set_name']
+            )
+            ->where('entity_type_id = ?', $entityTypeId)
+            ->order('attribute_set_name ASC');
+        if ($filter !== null && $filter !== '') {
+            $select->where('attribute_set_name LIKE ?', $filter . '%');
+        }
+
+        $out = [];
+        foreach ($connection->fetchAll($select) as $row) {
+            $out[(int) $row['attribute_set_id']] = (string) $row['attribute_set_name'];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array $preserve Tracked entry whose non-DB keys (inherit, version) are kept.
+     * @return array
+     */
+    private function buildSetEntry(int $setId, string $setName, array $preserve): array
+    {
+        $entry = ['name' => $setName];
+        if (isset($preserve['inherit'])) {
+            $entry['inherit'] = $preserve['inherit'];
+        }
+        if (array_key_exists('version', $preserve)) {
+            $entry['version'] = $preserve['version'];
+        }
+
+        $groups = [];
+        foreach ($this->fetchGroups($setId) as $group) {
+            $attributes = $this->fetchUserDefinedAttributes((int) $group['attribute_group_id']);
+            if ($attributes === []) {
+                continue;
+            }
+            $groupEntry = ['name' => (string) $group['attribute_group_name']];
+            if (!empty($group['attribute_group_code'])) {
+                $groupEntry['code'] = (string) $group['attribute_group_code'];
+            }
+            $groupEntry['attributes'] = $attributes;
+            $groups[] = $groupEntry;
+        }
+        if ($groups !== []) {
+            $entry['groups'] = $groups;
+        }
+
+        return $entry;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function fetchGroups(int $setId): array
+    {
+        $connection = $this->resourceConnection->getConnection();
+        $select = $connection->select()
+            ->from(
+                $this->resourceConnection->getTableName('eav_attribute_group'),
+                ['attribute_group_id', 'attribute_group_name', 'attribute_group_code']
+            )
+            ->where('attribute_set_id = ?', $setId)
+            ->order('sort_order ASC');
+
+        return $connection->fetchAll($select);
+    }
+
+    /**
+     * @return string[] user-defined attribute codes assigned to the group, in order.
+     */
+    private function fetchUserDefinedAttributes(int $groupId): array
+    {
+        $connection = $this->resourceConnection->getConnection();
+        $select = $connection->select()
+            ->from(['eea' => $this->resourceConnection->getTableName('eav_entity_attribute')], [])
+            ->join(
+                ['ea' => $this->resourceConnection->getTableName('eav_attribute')],
+                'ea.attribute_id = eea.attribute_id',
+                ['attribute_code']
+            )
+            ->where('eea.attribute_group_id = ?', $groupId)
+            ->where('ea.is_user_defined = ?', 1)
+            ->order('eea.sort_order ASC');
+
+        return array_map('strval', $connection->fetchCol($select));
     }
 
     public function getAlias(): string
