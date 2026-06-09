@@ -12,9 +12,12 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\ReconciliationOutcome;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Customer\Api\Data\GroupInterface;
 use Magento\Customer\Api\Data\GroupInterfaceFactory;
 use Magento\Customer\Api\GroupRepositoryInterface;
@@ -39,7 +42,8 @@ class CustomerGroups implements ComponentInterface
         private readonly GroupInterfaceFactory $groupFactory,
         private readonly TaxClassRepositoryInterface $taxClassRepository,
         private readonly SearchCriteriaBuilder $searchCriteriaBuilder,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -79,7 +83,7 @@ class CustomerGroups implements ComponentInterface
     }
 
     /**
-     * Create a customer group, skipping creation when one with the same code exists.
+     * Create a customer group, or in maintain mode re-point its tax class.
      */
     private function createCustomerGroup(
         string $groupName,
@@ -87,34 +91,58 @@ class CustomerGroups implements ComponentInterface
         ComponentContext $context,
         ComponentResult $result
     ): void {
-        if ($this->groupExists($groupName)) {
-            $this->log->logInfo(sprintf('Customer Group "%s" already exists, creation skipped', $groupName));
+        $existing = $this->findGroup($groupName);
+        $exists = $existing !== null;
+        $unchanged = $exists && (int) $existing->getTaxClassId() === $taxClassId;
+
+        $request = new ReconciliationRequest(
+            self::ALIAS,
+            $groupName,
+            $context->getMode(),
+            $exists,
+            null,
+            $exists ? $unchanged : null
+        );
+
+        $outcome = $this->gate->decide($request);
+        if ($outcome->isSkip()) {
+            $this->log->logInfo(sprintf(
+                'Customer Group "%s" %s, skipped',
+                $groupName,
+                $unchanged ? 'unchanged' : 'protected (create mode)'
+            ));
             $result->recordSkipped();
             return;
         }
 
         if ($context->isDryRun()) {
-            $this->log->logInfo(sprintf('[dry-run] Would create Customer Group "%s"', $groupName));
-            $result->recordCreated();
+            $this->log->logInfo(sprintf('[dry-run] Would %s Customer Group "%s"', $outcome->value, $groupName));
+            $outcome->record($result);
             return;
         }
 
-        $group = $this->groupFactory->create();
+        $group = $exists ? $existing : $this->groupFactory->create();
         $group->setCode($groupName);
         $group->setTaxClassId($taxClassId);
         $this->groupRepository->save($group);
 
-        $this->log->logInfo(sprintf('Customer Group "%s" created', $groupName));
-        $result->recordCreated();
+        $this->log->logInfo(sprintf(
+            'Customer Group "%s" %s',
+            $groupName,
+            $outcome === ReconciliationOutcome::Create ? 'created' : 'updated'
+        ));
+        $outcome->record($result);
     }
 
-    private function groupExists(string $groupName): bool
+    private function findGroup(string $groupName): ?GroupInterface
     {
         $criteria = $this->searchCriteriaBuilder
             ->addFilter(GroupInterface::CODE, $groupName)
             ->create();
 
-        return $this->groupRepository->getList($criteria)->getTotalCount() > 0;
+        $items = $this->groupRepository->getList($criteria)->getItems();
+
+        return $items === [] ? null : current($items);
     }
 
     /**

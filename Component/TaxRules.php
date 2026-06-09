@@ -12,9 +12,12 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\ReconciliationOutcome;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Tax\Model\Calculation\RuleFactory;
 use Magento\Tax\Model\Calculation\RateFactory;
 use Magento\Tax\Model\ClassModelFactory;
@@ -45,7 +48,8 @@ class TaxRules implements ComponentInterface
         private readonly RuleFactory $ruleFactory,
         private readonly TaxRuleResource $taxRuleResource,
         private readonly TaxClassResource $taxClassResource,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -213,11 +217,15 @@ class TaxRules implements ComponentInterface
     private function createTaxRule(array $ruleData, ComponentContext $context, ComponentResult $result): void
     {
         $rule = $this->ruleFactory->create();
-        $ruleCount = $rule->getCollection()->addFieldToFilter('code', $ruleData['code'])->getSize();
+        $existing = $rule->getCollection()->addFieldToFilter('code', $ruleData['code'])->getFirstItem();
+        $exists = (bool) $existing->getId();
 
-        if ($ruleCount > 0) {
+        $request = new ReconciliationRequest(self::ALIAS, (string) $ruleData['code'], $context->getMode(), $exists);
+
+        $outcome = $this->gate->decide($request);
+        if ($outcome->isSkip()) {
             $this->log->logComment(
-                sprintf('Tax Rule "%s" already exists in database.', $ruleData['code'])
+                sprintf('Tax Rule "%s" exists, skipped (create mode).', $ruleData['code'])
             );
             $result->recordSkipped();
 
@@ -226,13 +234,14 @@ class TaxRules implements ComponentInterface
 
         if ($context->isDryRun()) {
             $this->log->logInfo(
-                sprintf('[dry-run] Would create Tax Rule "%s".', $ruleData['code'])
+                sprintf('[dry-run] Would %s Tax Rule "%s".', $outcome->value, $ruleData['code'])
             );
-            $result->recordCreated();
+            $outcome->record($result);
 
             return;
         }
 
+        $rule = $outcome === ReconciliationOutcome::Create ? $rule : $existing;
         $rule->setCode($ruleData['code'])
             ->setTaxRateIds($ruleData['tax_rate_ids'])
             ->setCustomerTaxClassIds($ruleData['customer_tax_class_ids'])
@@ -243,9 +252,9 @@ class TaxRules implements ComponentInterface
         $this->taxRuleResource->save($rule);
 
         $this->log->logInfo(
-            sprintf('Tax Rule "%s" created.', $ruleData['code'])
+            sprintf('Tax Rule "%s" %s.', $ruleData['code'], $outcome->value)
         );
-        $result->recordCreated();
+        $outcome->record($result);
     }
 
     public function getAlias(): string

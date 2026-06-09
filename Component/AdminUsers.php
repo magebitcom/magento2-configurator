@@ -11,10 +11,14 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\ReconciliationOutcome;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\Framework\Validator\Exception as ValidatorException;
 use Magento\User\Model\ResourceModel\User as UserResource;
@@ -36,7 +40,8 @@ class AdminUsers implements ComponentInterface
         private readonly UserFactory $userFactory,
         private readonly UserResource $userResource,
         private readonly RoleFactory $roleFactory,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -67,7 +72,7 @@ class AdminUsers implements ComponentInterface
                 }
 
                 try {
-                    $this->createAdminUser($userData, $roleId, $context->isDryRun(), $result);
+                    $this->createAdminUser($userData, $roleId, $context->getMode(), $context->isDryRun(), $result);
                 } catch (ValidatorException $e) {
                     $message = sprintf('Magento Framework Validation Exception: %s', $e->getMessage());
                     $this->log->logError($message);
@@ -87,16 +92,32 @@ class AdminUsers implements ComponentInterface
      *
      * @param array $userData
      */
-    private function createAdminUser(array $userData, int $roleId, bool $dryRun, ComponentResult $result): void
-    {
+    private function createAdminUser(
+        array $userData,
+        int $roleId,
+        ComponentMode $mode,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
         $fullName = $userData['firstname'] . ' ' . $userData['secondname'];
 
         $user = $this->userFactory->create();
-        $exists = $user->getCollection()->addFieldToFilter('email', $userData['email'])->getSize() > 0;
+        $existing = $user->getCollection()->addFieldToFilter('email', $userData['email'])->getFirstItem();
+        $exists = (bool) $existing->getId();
 
-        if ($exists) {
+        $version = $userData['version'] ?? null;
+        $request = new ReconciliationRequest(
+            self::ALIAS,
+            (string) $userData['email'],
+            $mode,
+            $exists,
+            $version ? (int) $version : null
+        );
+
+        $outcome = $this->gate->decide($request);
+        if ($outcome->isSkip()) {
             $this->log->logComment(sprintf(
-                'Admin User "%s" creation skipped: a user with the email "%s" already exists',
+                'Admin User "%s" (%s) skipped (create mode)',
                 $fullName,
                 $userData['email']
             ));
@@ -105,36 +126,50 @@ class AdminUsers implements ComponentInterface
         }
 
         if ($dryRun) {
-            $this->log->logInfo(sprintf('[dry-run] Would create Admin User "%s" (%s)', $fullName, $userData['email']));
-            $result->recordCreated();
+            $this->log->logInfo(sprintf(
+                '[dry-run] Would %s Admin User "%s" (%s)',
+                $outcome->value,
+                $fullName,
+                $userData['email']
+            ));
+            $outcome->record($result);
             return;
         }
 
-        $this->log->logInfo(sprintf('Admin User "%s" (%s) being created', $fullName, $userData['email']));
+        $isCreate = $outcome === ReconciliationOutcome::Create;
+        $user = $isCreate ? $user : $this->userFactory->create()->load($existing->getId());
+
+        $this->log->logInfo(sprintf('Admin User "%s" (%s) being %s', $fullName, $userData['email'], $outcome->value));
 
         $user
             ->setUserName($userData['username'])
             ->setFirstName($userData['firstname'])
             ->setLastName($userData['secondname'])
             ->setEmail($userData['email'])
-            ->setPassword($userData['password'])
             ->setIsActive(true)
             ->setRoleId($roleId);
+
+        // Only set the password on creation; re-setting it on every maintain run
+        // would re-hash and force the user to reset their password.
+        if ($isCreate) {
+            $user->setPassword($userData['password']);
+        }
 
         if (array_key_exists('interface_locale', $userData)) {
             $user->setInterfaceLocale($userData['interface_locale']);
         }
 
         if ($user->validate() !== true) {
-            $message = sprintf('Admin User "%s" failed validation and was not created', $fullName);
+            $message = sprintf('Admin User "%s" failed validation and was not saved', $fullName);
             $this->log->logError($message);
             $result->addError($message);
             return;
         }
 
         $this->userResource->save($user);
-        $result->recordCreated();
-        $this->log->logInfo(sprintf('Admin User "%s" created successfully', $fullName));
+        $this->gate->commitVersion($request, $dryRun);
+        $outcome->record($result);
+        $this->log->logInfo(sprintf('Admin User "%s" %s successfully', $fullName, $outcome->value));
     }
 
     /**
