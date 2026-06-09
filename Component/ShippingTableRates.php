@@ -11,9 +11,11 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magento\OfflineShipping\Model\ResourceModel\Carrier\TablerateFactory;
 use Magento\OfflineShipping\Model\ResourceModel\Carrier\Tablerate;
 use Magento\Store\Model\WebsiteFactory;
@@ -21,7 +23,7 @@ use Magento\Store\Model\Website;
 use Magento\Directory\Model\RegionFactory;
 use Magento\Directory\Model\Region;
 
-class ShippingTableRates implements ComponentInterface
+class ShippingTableRates implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'shippingtablerates';
     private const DESCRIPTION = 'Component to create and maintain Shipping Table Rates';
@@ -154,6 +156,165 @@ class ShippingTableRates implements ComponentInterface
     {
         unset($shippingRate['dest_region_code']);
         unset($shippingRate['website_code']);
+    }
+
+    /**
+     * Export current shipping_tablerate rows into the source format. Refresh mode
+     * rebuilds only the website codes already tracked in the source file (keeping
+     * a tracked website's existing entry untouched if it has no rows in the DB);
+     * full mode dumps every website's rows, optionally limited to a single website
+     * code via the filter.
+     */
+    public function export(ExportContext $context): array
+    {
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData());
+    }
+
+    /**
+     * Rebuild the rate rows for each website code already present in the source
+     * file, reading their current values from the DB. A tracked website that no
+     * longer has any rows in the DB keeps its existing entry unchanged.
+     *
+     * @param array $existing
+     * @return array
+     */
+    private function refreshTracked(array $existing): array
+    {
+        $out = [];
+        foreach ($existing as $code => $entries) {
+            $websiteId = $this->resolveWebsiteId((string) $code);
+            if ($websiteId === null) {
+                $out[$code] = $entries;
+                continue;
+            }
+
+            $rows = $this->fetchRows($websiteId);
+            $out[$code] = $rows === [] ? $entries : $rows;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Dump every website's rate rows from the DB. If a filter is given it is
+     * treated as a website code and only that website is exported.
+     *
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        /** @var Tablerate $tablerateModel */
+        $tablerateModel = $this->tablerateFactory->create();
+        $connection = $tablerateModel->getConnection();
+
+        $select = $connection->select()
+            ->from($tablerateModel->getMainTable())
+            ->order('website_id')
+            ->order('pk');
+
+        if ($filter !== null && $filter !== '') {
+            $websiteId = $this->resolveWebsiteId($filter);
+            if ($websiteId === null) {
+                return [];
+            }
+            $select->where('website_id = ?', $websiteId);
+        }
+
+        $out = [];
+        foreach ($connection->fetchAll($select) as $row) {
+            $code = $this->resolveWebsiteCode((int) $row['website_id']);
+            if ($code === null) {
+                continue;
+            }
+            $out[$code][] = $this->mapRow($row);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Fetch the rate rows for a single website id in the source-row format.
+     *
+     * @param int $websiteId
+     * @return array
+     */
+    private function fetchRows(int $websiteId): array
+    {
+        /** @var Tablerate $tablerateModel */
+        $tablerateModel = $this->tablerateFactory->create();
+        $connection = $tablerateModel->getConnection();
+
+        $select = $connection->select()
+            ->from($tablerateModel->getMainTable())
+            ->where('website_id = ?', $websiteId)
+            ->order('pk');
+
+        $rows = [];
+        foreach ($connection->fetchAll($select) as $row) {
+            $rows[] = $this->mapRow($row);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Map a DB row back to the documented source-row format, resolving the
+     * region id back to its code (0 / unresolved => "*").
+     *
+     * @param array $row
+     * @return array
+     */
+    private function mapRow(array $row): array
+    {
+        return [
+            'dest_country_id' => $row['dest_country_id'],
+            'dest_region_code' => $this->resolveRegionCode((int) $row['dest_region_id']),
+            'dest_zip' => $row['dest_zip'],
+            'condition_name' => $row['condition_name'],
+            'condition_value' => $row['condition_value'] + 0,
+            'price' => $row['price'] + 0,
+            'cost' => $row['cost'] + 0,
+        ];
+    }
+
+    private function resolveWebsiteId(string $code): ?int
+    {
+        /** @var Website $website */
+        $website = $this->websiteFactory->create();
+        $website->load($code, 'code');
+
+        return $website->getId() ? (int) $website->getId() : null;
+    }
+
+    private function resolveWebsiteCode(int $websiteId): ?string
+    {
+        /** @var Website $website */
+        $website = $this->websiteFactory->create();
+        $website->load($websiteId);
+
+        return $website->getId() ? (string) $website->getCode() : null;
+    }
+
+    /**
+     * Resolve a region id back to its region code. A 0 (or unresolved) id maps
+     * to "*", matching the wildcard used in the source format.
+     */
+    private function resolveRegionCode(int $regionId): string
+    {
+        if ($regionId === 0) {
+            return '*';
+        }
+
+        /** @var Region $region */
+        $region = $this->regionFactory->create();
+        $region->load($regionId);
+
+        $code = $region->getId() ? (string) $region->getCode() : '';
+
+        return $code !== '' ? $code : '*';
     }
 
     public function getAlias(): string

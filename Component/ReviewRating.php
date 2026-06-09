@@ -11,9 +11,11 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Review\Model\Rating;
@@ -30,7 +32,7 @@ use Magento\Review\Model\Rating\OptionFactory;
  * @SuppressWarnings("CouplingBetweenObjects")
  * @SuppressWarnings(PHPMD.ShortVariable)
  */
-class ReviewRating implements ComponentInterface
+class ReviewRating implements ComponentInterface, ExportableComponentInterface
 {
     const MAX_NUM_RATINGS = 5;
 
@@ -242,6 +244,116 @@ class ReviewRating implements ComponentInterface
             $this->entityId = (int) $entity->getIdByCode('product');
         }
         return $this->entityId;
+    }
+
+    /**
+     * Export current review rating criteria into the source format. Refresh mode
+     * rewrites only the rating codes already tracked in the source file; full mode
+     * dumps every rating bound to the `product` review entity (optionally filtered
+     * by a rating-code prefix). Each entry carries its current is_active, position
+     * and assigned store codes.
+     */
+    public function export(ExportContext $context): array
+    {
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData());
+    }
+
+    /**
+     * Rebuild the tracked ratings from their current DB state, preserving any
+     * non-value keys (e.g. version). A tracked code that no longer exists in the
+     * DB keeps its existing entry untouched.
+     *
+     * @param array $existing
+     * @return array
+     */
+    private function refreshTracked(array $existing): array
+    {
+        $tracked = $existing['review_rating'] ?? null;
+        if (!is_array($tracked)) {
+            return $existing;
+        }
+
+        $out = [];
+        foreach ($tracked as $code => $entry) {
+            $entry = is_array($entry) ? $entry : [];
+            $rating = $this->getReviewRating((string) $code);
+
+            if (!$rating->getId()) {
+                $out[$code] = $tracked[$code];
+                continue;
+            }
+
+            $out[$code] = $this->mergeRatingValues($entry, $rating);
+        }
+
+        return ['review_rating' => $out];
+    }
+
+    /**
+     * Export every rating bound to the `product` review entity, keyed by code.
+     *
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        /** @var \Magento\Review\Model\ResourceModel\Rating\Collection $collection */
+        $collection = $this->ratingFactory->create()->getCollection();
+        $collection->addEntityFilter($this->getReviewEntityId());
+
+        $out = [];
+        foreach ($collection as $rating) {
+            $code = (string) $rating->getRatingCode();
+            if ($filter !== null && $filter !== '' && !str_starts_with($code, $filter)) {
+                continue;
+            }
+
+            $out[$code] = $this->mergeRatingValues([], $rating);
+        }
+
+        return ['review_rating' => $out];
+    }
+
+    /**
+     * Overwrite the value keys (is_active, position, stores) of an entry with the
+     * rating's current DB state, preserving any other keys already present.
+     *
+     * @param array $entry
+     * @param Rating $rating
+     * @return array
+     */
+    private function mergeRatingValues(array $entry, Rating $rating): array
+    {
+        $entry['is_active'] = (int) $rating->getData('is_active');
+        $entry['position'] = (int) $rating->getData('position');
+        $entry['stores'] = $this->getStoreCodesByRating($rating);
+
+        return $entry;
+    }
+
+    /**
+     * Resolve the store codes a rating is assigned to (in the order returned by
+     * the resource model). Store ids that no longer resolve are skipped.
+     *
+     * @param Rating $rating
+     * @return array
+     */
+    private function getStoreCodesByRating(Rating $rating): array
+    {
+        $codes = [];
+        foreach ($this->ratingResource->getStores((int) $rating->getId()) as $storeId) {
+            try {
+                $codes[] = $this->storeRepository->getById((int) $storeId)->getCode();
+            } catch (\Exception $e) {
+                $this->log->logComment(
+                    sprintf('Skipping unknown store id "%s" for rating "%s"', $storeId, $rating->getRatingCode())
+                );
+            }
+        }
+
+        return $codes;
     }
 
     public function getAlias(): string

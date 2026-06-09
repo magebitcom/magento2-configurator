@@ -12,11 +12,13 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\ComponentMode;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Exception;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Cms\Api\Data\PageInterface;
@@ -38,10 +40,33 @@ use Magento\Framework\EntityManager\MetadataPool;
 /**
  * @see \Magebit\Configurator\Component\Pages
  */
-class Pages implements ComponentInterface
+class Pages implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'pages';
     private const DESCRIPTION = 'Component to create/maintain pages.';
+
+    /**
+     * CMS page fields written back to source on export, in source-file order.
+     * `content` is the rendered output of a `source` template on import, so when an
+     * entry tracks `source` we never overwrite it with the stored content.
+     */
+    private const EXPORT_FIELDS = [
+        'title',
+        'meta_title',
+        'meta_keywords',
+        'meta_description',
+        'content_heading',
+        'content',
+        'sort_order',
+        'layout_update_xml',
+        'custom_theme',
+        'custom_root_template',
+        'custom_layout_update_xml',
+        'custom_theme_from',
+        'custom_theme_to',
+        'page_layout',
+        'is_active',
+    ];
 
     protected array $requiredFields = ['title'];
     protected array $defaultValues = ['page_layout' => 'empty', 'is_active' => '1'];
@@ -354,6 +379,224 @@ class Pages implements ComponentInterface
                 $pageData[$key] = $value;
             }
         }
+    }
+
+    /**
+     * Export current CMS pages into the source format. Refresh mode rewrites only
+     * the identifiers already tracked in the source file (re-reading each tracked
+     * page definition from `cms_page`); full mode dumps every CMS page (optionally
+     * filtered by an identifier prefix). Entries whose content comes from a `source`
+     * template keep their `source` reference rather than inlining stored content,
+     * and any non-value keys (e.g. version, stores) are preserved. There are no
+     * secrets to skip for this component.
+     */
+    public function export(ExportContext $context): array
+    {
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData(), $context->getFilter());
+    }
+
+    /**
+     * Refresh each tracked identifier's page definitions from the DB, preserving the
+     * tracked field set, the `source` reference, `stores`, and any non-value keys
+     * (e.g. version). Tracked identifiers that no longer resolve to a CMS page, and
+     * identifiers not matching the filter, are kept untouched.
+     *
+     * @param array $existing
+     * @param string|null $filter
+     * @return array
+     */
+    private function refreshTracked(array $existing, ?string $filter): array
+    {
+        $out = [];
+        foreach ($existing as $identifier => $entry) {
+            $id = (string) $identifier;
+            $entry = (array) $entry;
+
+            if ($filter !== null && $filter !== '' && !str_starts_with($id, $filter)) {
+                $out[$id] = $entry;
+                continue;
+            }
+
+            if (!isset($entry['page']) || !is_array($entry['page'])) {
+                $out[$id] = $entry;
+                continue;
+            }
+
+            $pages = [];
+            foreach ($entry['page'] as $pageData) {
+                $pages[] = $this->refreshPageEntry($id, (array) $pageData);
+            }
+            $entry['page'] = $pages;
+            $out[$id] = $entry;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Re-read a single tracked page definition from the DB, updating only the keys
+     * already present in the entry (preserving `source`, `stores`, `version`, …).
+     * The entry is returned untouched when no matching CMS page exists.
+     *
+     * @param string $identifier
+     * @param array $pageData
+     * @return array
+     */
+    private function refreshPageEntry(string $identifier, array $pageData): array
+    {
+        $storeId = $this->resolveStoreId($pageData['stores'] ?? null);
+        if ($storeId === null) {
+            return $pageData;
+        }
+
+        try {
+            $pageId = $this->getPageIdByIdentifier($identifier, $storeId);
+        } catch (Exception $e) {
+            $this->log->logError($e->getMessage());
+            return $pageData;
+        }
+
+        if ($pageId === false) {
+            return $pageData;
+        }
+
+        try {
+            $page = $this->pageRepository->getById($pageId);
+        } catch (LocalizedException $e) {
+            $this->log->logError($e->getMessage());
+            return $pageData;
+        }
+
+        foreach (self::EXPORT_FIELDS as $field) {
+            // Only refresh keys the source already tracks; never overwrite a
+            // `source` template by inlining the stored, rendered content.
+            if (!array_key_exists($field, $pageData)) {
+                continue;
+            }
+            if ($field === 'content' && array_key_exists('source', $pageData)) {
+                continue;
+            }
+            $pageData[$field] = $page->getData($field);
+        }
+
+        return $pageData;
+    }
+
+    /**
+     * Dump every CMS page in the source format, keyed by identifier, each with a
+     * single `page` definition. Pages assigned to specific (non-default) store views
+     * carry a `stores` list of store codes. Optionally filtered by identifier prefix.
+     *
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        $connection = $this->resourceConnection->getConnection();
+        $cmsPageTable = $connection->getTableName('cms_page');
+
+        $select = $connection->select()
+            ->from(['cp' => $cmsPageTable], ['page_id', 'identifier']);
+
+        if ($filter !== null && $filter !== '') {
+            $select->where('cp.identifier LIKE ?', $filter . '%');
+        }
+        $select->order('cp.identifier ASC');
+
+        $out = [];
+        foreach ($connection->fetchAll($select) as $row) {
+            $identifier = (string) $row['identifier'];
+            $pageId = (int) $row['page_id'];
+
+            try {
+                $page = $this->pageRepository->getById($pageId);
+            } catch (LocalizedException $e) {
+                $this->log->logError($e->getMessage());
+                continue;
+            }
+
+            $entry = [];
+            foreach (self::EXPORT_FIELDS as $field) {
+                $entry[$field] = $page->getData($field);
+            }
+
+            $stores = $this->resolveStoreCodes($pageId);
+            if ($stores !== []) {
+                $entry['stores'] = $stores;
+            }
+
+            $out[$identifier] = ['page' => [$entry]];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Resolve a store id to scope a tracked entry's lookup. Uses the first store
+     * code when the entry targets specific stores, otherwise the default store (0).
+     * Returns null when a tracked store code can no longer be resolved.
+     *
+     * @param mixed $stores
+     * @return int|null
+     */
+    private function resolveStoreId(mixed $stores): ?int
+    {
+        if (!is_array($stores) || $stores === []) {
+            return 0;
+        }
+
+        try {
+            return (int) $this->storeRepository->get((string) reset($stores))->getId();
+        } catch (NoSuchEntityException $e) {
+            $this->log->logError($e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Store codes a CMS page is assigned to, excluding the "all stores" (0) row.
+     * Returns an empty array for default-scope pages so no `stores` key is emitted.
+     *
+     * @param int $pageId
+     * @return string[]
+     */
+    private function resolveStoreCodes(int $pageId): array
+    {
+        try {
+            $linkField = $this->metadataPool->getMetadata(PageInterface::class)->getLinkField();
+        } catch (Exception $e) {
+            $this->log->logError($e->getMessage());
+            return [];
+        }
+
+        $connection = $this->resourceConnection->getConnection();
+        $cmsPageTable = $connection->getTableName('cms_page');
+        $cmsPageStoreTable = $connection->getTableName('cms_page_store');
+
+        $select = $connection->select()
+            ->from(['cps' => $cmsPageStoreTable], ['store_id'])
+            ->join(
+                ['cp' => $cmsPageTable],
+                'cp.' . $linkField . ' = cps.' . $linkField,
+                []
+            )
+            ->where('cp.page_id = ?', $pageId);
+
+        $codes = [];
+        foreach ($connection->fetchCol($select) as $storeId) {
+            if ((int) $storeId === Store::DEFAULT_STORE_ID) {
+                continue;
+            }
+            try {
+                $codes[] = $this->storeRepository->getById((int) $storeId)->getCode();
+            } catch (NoSuchEntityException $e) {
+                $this->log->logError($e->getMessage());
+            }
+        }
+
+        return $codes;
     }
 
     public function getAlias(): string

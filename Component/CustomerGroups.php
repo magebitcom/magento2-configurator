@@ -11,17 +11,20 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Api\ReconciliationOutcome;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Customer\Api\Data\GroupInterface;
 use Magento\Customer\Api\Data\GroupInterfaceFactory;
 use Magento\Customer\Api\GroupRepositoryInterface;
 use Magento\Framework\Api\SearchCriteriaBuilder;
+use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Tax\Api\TaxClassRepositoryInterface;
 
 /**
@@ -29,7 +32,7 @@ use Magento\Tax\Api\TaxClassRepositoryInterface;
  *
  * @SuppressWarnings(PHPMD.ShortVariable)
  */
-class CustomerGroups implements ComponentInterface
+class CustomerGroups implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'customergroups';
     private const DESCRIPTION = 'Component to create customer groups.';
@@ -189,6 +192,154 @@ class CustomerGroups implements ComponentInterface
         }
 
         return (int) $taxClass->getClassId();
+    }
+
+    /**
+     * Export customer groups into the source format (tax class name -> groups[].name).
+     * Refresh mode rewrites only the groups already tracked in the source file, placing
+     * each under its current tax class; full mode dumps every customer group in the
+     * database (optionally filtered by a group-code prefix).
+     */
+    public function export(ExportContext $context): array
+    {
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData());
+    }
+
+    /**
+     * Rebuild the source structure for the groups already tracked in the file, reading
+     * each group's current tax class from the DB. Tracked groups that no longer exist
+     * in the DB keep their original entry under their original tax class. Non-value keys
+     * on a tax-class entry (e.g. version) are preserved.
+     *
+     * @param array $existing
+     * @return array
+     */
+    private function refreshTracked(array $existing): array
+    {
+        $tracked = $existing['customergroups'] ?? null;
+        if (!is_array($tracked)) {
+            return $existing;
+        }
+
+        $buckets = [];
+        $order = [];
+        $taxClassNameCache = [];
+
+        foreach ($tracked as $taxClassConfig) {
+            $originalTaxClass = $taxClassConfig['taxclass'] ?? null;
+            $this->rememberTaxClass($buckets, $order, $taxClassConfig, (string) $originalTaxClass);
+
+            foreach ($taxClassConfig['groups'] ?? [] as $group) {
+                $groupName = is_array($group) ? ($group['name'] ?? null) : null;
+                if ($groupName === null || $groupName === '') {
+                    continue;
+                }
+
+                $existingGroup = $this->findGroup((string) $groupName);
+                if ($existingGroup === null) {
+                    // Tracked group gone from the DB: keep it under its original tax class.
+                    $buckets[(string) $originalTaxClass]['groups'][] = $group;
+                    continue;
+                }
+
+                $currentTaxClass = $this->getTaxClassNameById((int) $existingGroup->getTaxClassId(), $taxClassNameCache)
+                    ?? (string) $originalTaxClass;
+                $this->rememberTaxClass($buckets, $order, [], $currentTaxClass);
+                $buckets[$currentTaxClass]['groups'][] = ['name' => (string) $existingGroup->getCode()];
+            }
+        }
+
+        $out = [];
+        foreach ($order as $taxClassName) {
+            $out[] = $buckets[$taxClassName];
+        }
+
+        return ['customergroups' => $out];
+    }
+
+    /**
+     * Export every customer group in the database, grouped by tax class name. When a
+     * filter is set, only groups whose code starts with it are exported.
+     *
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        $criteria = $this->searchCriteriaBuilder->create();
+        $groups = $this->groupRepository->getList($criteria)->getItems();
+
+        $buckets = [];
+        $order = [];
+        $taxClassNameCache = [];
+
+        foreach ($groups as $group) {
+            $code = (string) $group->getCode();
+            if ($filter !== null && $filter !== '' && !str_starts_with($code, $filter)) {
+                continue;
+            }
+
+            $taxClassName = $this->getTaxClassNameById((int) $group->getTaxClassId(), $taxClassNameCache);
+            if ($taxClassName === null) {
+                continue;
+            }
+
+            $this->rememberTaxClass($buckets, $order, [], $taxClassName);
+            $buckets[$taxClassName]['groups'][] = ['name' => $code];
+        }
+
+        $out = [];
+        foreach ($order as $taxClassName) {
+            $out[] = $buckets[$taxClassName];
+        }
+
+        return ['customergroups' => $out];
+    }
+
+    /**
+     * Ensure a tax-class bucket exists, preserving any non-value keys (taxclass,
+     * version, …) from the source entry the first time it is seen.
+     *
+     * @param array<string, array> $buckets
+     * @param array<int, string> $order
+     * @param array $sourceEntry
+     */
+    private function rememberTaxClass(array &$buckets, array &$order, array $sourceEntry, string $taxClassName): void
+    {
+        if (isset($buckets[$taxClassName])) {
+            return;
+        }
+
+        $bucket = $sourceEntry;
+        unset($bucket['groups']);
+        $bucket['taxclass'] = $taxClassName;
+        $bucket['groups'] = [];
+
+        $buckets[$taxClassName] = $bucket;
+        $order[] = $taxClassName;
+    }
+
+    /**
+     * Resolve a tax class name from its id, caching lookups. Returns null if the tax
+     * class no longer exists.
+     *
+     * @param array<int, string|null> $cache
+     */
+    private function getTaxClassNameById(int $taxClassId, array &$cache): ?string
+    {
+        if (array_key_exists($taxClassId, $cache)) {
+            return $cache[$taxClassId];
+        }
+
+        try {
+            $cache[$taxClassId] = (string) $this->taxClassRepository->get($taxClassId)->getClassName();
+        } catch (NoSuchEntityException $e) {
+            $cache[$taxClassId] = null;
+        }
+
+        return $cache[$taxClassId];
     }
 
     public function getAlias(): string

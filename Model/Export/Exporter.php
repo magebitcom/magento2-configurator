@@ -124,10 +124,14 @@ class Exporter
 
     private function writeFile(string $path, array $data, bool $dryRun): void
     {
-        $yaml = Yaml::dump($data, self::YAML_INLINE_DEPTH, self::YAML_INDENT, Yaml::DUMP_MULTI_LINE_LITERAL_BLOCK);
+        // CSV-sourced components (e.g. tax rates, rewrites) export a list of rows
+        // (header first); everything else is YAML.
+        $content = str_ends_with(strtolower($path), '.csv')
+            ? $this->toCsv($data)
+            : Yaml::dump($data, self::YAML_INLINE_DEPTH, self::YAML_INDENT, Yaml::DUMP_MULTI_LINE_LITERAL_BLOCK);
 
         if ($dryRun) {
-            $this->log->logInfo(sprintf('[dry-run] Would write %s (%d bytes)', $path, strlen($yaml)));
+            $this->log->logInfo(sprintf('[dry-run] Would write %s (%d bytes)', $path, strlen($content)));
             return;
         }
 
@@ -138,7 +142,26 @@ class Exporter
             mkdir($dir, 0755, true);
         }
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
-        file_put_contents($path, $yaml);
+        file_put_contents($path, $content);
         $this->log->logInfo(sprintf('Wrote %s', $path));
+    }
+
+    /**
+     * @param array $rows List of row arrays (the first row is the header).
+     */
+    private function toCsv(array $rows): string
+    {
+        // phpcs:ignore Magento2.Functions.DiscouragedFunction
+        $handle = fopen('php://temp', 'r+');
+        foreach ($rows as $row) {
+            // phpcs:ignore Magento2.Functions.DiscouragedFunction
+            fputcsv($handle, (array) $row, ',', '"', '');
+        }
+        rewind($handle);
+        $csv = (string) stream_get_contents($handle);
+        // phpcs:ignore Magento2.Functions.DiscouragedFunction
+        fclose($handle);
+
+        return $csv;
     }
 }

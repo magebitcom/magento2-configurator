@@ -12,10 +12,12 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\ComponentMode;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Authorization\Model\Acl\Role\Group as RoleGroup;
@@ -29,7 +31,7 @@ use Magento\Authorization\Model\UserContextInterface;
  *
  * @SuppressWarnings(PHPMD.ShortVariable)
  */
-class AdminRoles implements ComponentInterface
+class AdminRoles implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'adminroles';
     private const DESCRIPTION = 'Component to create admin roles.';
@@ -156,6 +158,122 @@ class AdminRoles implements ComponentInterface
 
         $this->log->logInfo(sprintf('Admin Role "%s" resources updating', $roleName));
         $this->rulesFactory->create()->setRoleId($role->getId())->setResources($resources)->saveRel();
+    }
+
+    /**
+     * Export current admin roles into the source format. Refresh mode rewrites
+     * only the roles already tracked in the source file (matched by name),
+     * rebuilding their `resources` from the DB while preserving other keys
+     * (e.g. version); roles no longer in the DB are kept untouched. Full mode
+     * dumps every admin role (optionally filtered by a role-name prefix).
+     */
+    public function export(ExportContext $context): array
+    {
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData(), $context->getFilter());
+    }
+
+    /**
+     * @param array $existing
+     * @param string|null $filter
+     * @return array
+     */
+    private function refreshTracked(array $existing, ?string $filter): array
+    {
+        $roles = $existing['adminroles'] ?? null;
+        if (!is_array($roles)) {
+            return ['adminroles' => []];
+        }
+
+        $out = [];
+        foreach ($roles as $role) {
+            if (!is_array($role) || !isset($role['name'])) {
+                // Not a recognisable tracked entry; keep it unchanged.
+                $out[] = $role;
+                continue;
+            }
+
+            $name = (string) $role['name'];
+            if ($filter !== null && $filter !== '' && !str_starts_with($name, $filter)) {
+                $out[] = $role;
+                continue;
+            }
+
+            $roleId = $this->findRoleIdByName($name);
+            if ($roleId === null) {
+                // Tracked role no longer exists in the DB: keep the entry as-is.
+                $out[] = $role;
+                continue;
+            }
+
+            $role['resources'] = $this->getResourceIdsForRole($roleId);
+            $out[] = $role;
+        }
+
+        return ['adminroles' => $out];
+    }
+
+    /**
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        $collection = $this->roleFactory->create()->getCollection()
+            ->addFieldToFilter('role_type', RoleGroup::ROLE_TYPE)
+            ->addFieldToFilter('user_type', UserContextInterface::USER_TYPE_ADMIN);
+
+        if ($filter !== null && $filter !== '') {
+            $collection->addFieldToFilter('role_name', ['like' => $filter . '%']);
+        }
+
+        $out = [];
+        foreach ($collection as $role) {
+            $out[] = [
+                'name' => (string) $role->getRoleName(),
+                'resources' => $this->getResourceIdsForRole((int) $role->getId()),
+            ];
+        }
+
+        return ['adminroles' => $out];
+    }
+
+    /**
+     * Find an admin role id by its name, or null when it does not exist.
+     */
+    private function findRoleIdByName(string $roleName): ?int
+    {
+        $existing = $this->roleFactory->create()
+            ->getCollection()
+            ->addFieldToFilter('role_name', $roleName)
+            ->getFirstItem();
+
+        return $existing->getId() ? (int) $existing->getId() : null;
+    }
+
+    /**
+     * Read the ACL resource ids a role is allowed to access, in the same form
+     * `setResources()` consumes (the `allow` permission rows).
+     *
+     * @return string[]
+     */
+    private function getResourceIdsForRole(int $roleId): array
+    {
+        $rulesCollection = $this->rulesFactory->create()
+            ->getCollection()
+            ->addFieldToFilter('role_id', $roleId)
+            ->addFieldToFilter('permission', 'allow');
+
+        $resources = [];
+        foreach ($rulesCollection as $rule) {
+            $resourceId = $rule->getResourceId();
+            if ($resourceId !== null && $resourceId !== '') {
+                $resources[] = (string) $resourceId;
+            }
+        }
+
+        return $resources;
     }
 
     public function getAlias(): string
