@@ -378,16 +378,35 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
             return $definition;
         }
 
-        $definition['title'] = $block->getTitle();
-        $definition['is_active'] = (int) $block->getIsActive();
-
-        if (isset($definition['source']) && (string) $definition['source'] !== '') {
+        $usesSource = isset($definition['source']) && (string) $definition['source'] !== '';
+        if ($usesSource) {
             $this->writeSourceContent((string) $definition['source'], (string) $block->getContent(), $dryRun);
-        } else {
-            $definition['content'] = $block->getContent();
         }
 
-        return $definition;
+        // A tracked block exports everything about it from the DB.
+        $entry = [
+            'title' => $block->getTitle(),
+            'is_active' => (int) $block->getIsActive(),
+        ];
+        if (!$usesSource) {
+            $entry['content'] = $block->getContent();
+        }
+
+        // Preserve the tracked entry's non-DB keys (source, version, …).
+        foreach ($definition as $key => $value) {
+            if (in_array($key, ['title', 'is_active', 'content', 'stores'], true)) {
+                continue;
+            }
+            $entry[$key] = $value;
+        }
+
+        // Re-resolve store assignment from the DB so admin store changes are captured.
+        $codes = $this->resolveStoreCodes($block->getStoreId());
+        if ($codes !== []) {
+            $entry['stores'] = $codes;
+        }
+
+        return $entry;
     }
 
     /**

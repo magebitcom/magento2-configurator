@@ -478,18 +478,37 @@ class Pages implements ComponentInterface, ExportableComponentInterface
             $this->writeSourceContent((string) $pageData['source'], (string) $page->getContent(), $dryRun);
         }
 
+        // A tracked entity exports EVERYTHING about it: every field with a value,
+        // not just the keys already present — so admin changes to previously
+        // untracked fields (content_heading, layout, …) are captured.
+        $entry = [];
         foreach (self::EXPORT_FIELDS as $field) {
-            if (!array_key_exists($field, $pageData)) {
-                continue;
-            }
             // Content is handled via the source file above; never inline it here.
             if ($field === 'content' && $usesSource) {
                 continue;
             }
-            $pageData[$field] = $page->getData($field);
+            $value = $page->getData($field);
+            if ($value === null || $value === '') {
+                continue;
+            }
+            $entry[$field] = $value;
         }
 
-        return $pageData;
+        // Preserve the tracked entry's non-DB keys (source, version, …).
+        foreach ($pageData as $key => $value) {
+            if (in_array($key, self::EXPORT_FIELDS, true) || $key === 'stores') {
+                continue;
+            }
+            $entry[$key] = $value;
+        }
+
+        // Re-resolve store assignment from the DB so admin store changes are captured.
+        $stores = $this->resolveStoreCodes($pageId);
+        if ($stores !== []) {
+            $entry['stores'] = $stores;
+        }
+
+        return $entry;
     }
 
     /**
