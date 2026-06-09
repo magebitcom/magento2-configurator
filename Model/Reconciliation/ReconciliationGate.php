@@ -59,14 +59,16 @@ class ReconciliationGate
      */
     public function decide(ReconciliationRequest $request): ReconciliationOutcome
     {
-        if (!$request->exists) {
-            return ReconciliationOutcome::Create;
-        }
-
-        // An unchanged entity is always skipped, in either mode. A null means
-        // the caller could not cheaply diff, so we do not skip on this basis.
+        // An entity that already matches the config is always skipped, in either
+        // mode. Checked first so it holds regardless of how the caller measures
+        // existence. A null means the caller could not cheaply diff, so we do not
+        // skip on this basis and let the component run its own field diff.
         if ($request->unchanged === true) {
             return ReconciliationOutcome::Skip;
+        }
+
+        if (!$request->exists) {
+            return ReconciliationOutcome::Create;
         }
 
         // In create mode existing entities are protected unless their version bumped.

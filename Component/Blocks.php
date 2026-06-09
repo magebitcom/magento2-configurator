@@ -11,13 +11,14 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
-use Magebit\Configurator\Api\VersionManagementInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
 use Exception;
-use Magebit\Configurator\Model\Processor;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Cms\Api\BlockRepositoryInterface;
 use Magento\Cms\Api\Data\BlockInterfaceFactory;
 use Magento\Cms\Model\Block;
@@ -42,7 +43,7 @@ class Blocks implements ComponentInterface
         private readonly LoggerInterface $log,
         private readonly Filesystem $filesystem,
         private readonly Escaper $escaper,
-        private readonly VersionManagementInterface $versionManagement,
+        private readonly ReconciliationGate $gate,
         private readonly ObjectManagerInterface $objectManager
     ) {
         if (class_exists('Hyva\Theme\Model\ViewModelRegistry')) {
@@ -57,7 +58,7 @@ class Blocks implements ComponentInterface
     {
         $result = new ComponentResult();
         $data = $context->getData();
-        $mode = $context->getMode()->value;
+        $mode = $context->getMode();
 
         if (!is_array($data)) {
             $result->addError('No block data found in the source data.');
@@ -79,7 +80,7 @@ class Blocks implements ComponentInterface
     /**
      * @param string $identifier
      * @param array $blockData
-     * @param string $mode
+     * @param ComponentMode $mode
      * @param bool $dryRun
      * @param ComponentResult $result
      * @throws Exception
@@ -88,7 +89,7 @@ class Blocks implements ComponentInterface
     private function processBlock(
         string $identifier,
         array $blockData,
-        string $mode,
+        ComponentMode $mode,
         bool $dryRun,
         ComponentResult $result
     ): void {
@@ -105,17 +106,17 @@ class Blocks implements ComponentInterface
                 $block = null;
 
                 $version = $data['version'] ?? null;
-                $versionId = self::ALIAS . '_' . $identifier;
 
+                // Version key preserves the legacy composition: identifier with the
+                // store codes appended (no separator) when stores are specified.
+                $versionKey = $identifier;
                 if (isset($data['stores'])) {
-                    $versionId .= implode('_', $data['stores']);
+                    $versionKey .= implode('_', $data['stores']);
                 }
 
                 if ($version) {
                     unset($data['version']);
                 }
-
-                $isNewVersion = isset($version) && $this->versionManagement->isNewVersion($versionId, (int) $version);
 
                 // Check if there are existing blocks
                 if ($blocks->count()) {
@@ -133,13 +134,21 @@ class Blocks implements ComponentInterface
                 // Track whether we are creating a new block or updating an existing one
                 $isNew = $block === null;
 
+                $request = new ReconciliationRequest(
+                    self::ALIAS,
+                    $versionKey,
+                    $mode,
+                    !$isNew,
+                    $version ? (int) $version : null
+                );
+
                 // If there is still no block to play with, create a new block object.
                 if ($block === null) {
                     $block = $this->blockFactory->create();
                     $block->setIdentifier($identifier);
                     $canSave = true;
-                } elseif ($mode === Processor::MODE_CREATE && !$isNewVersion) {
-                    // In create mode we skip modifying block
+                } elseif ($this->gate->decide($request)->isSkip()) {
+                    // In create mode we skip modifying an existing block (unless its version bumped).
                     $this->log->logComment(sprintf("'%s' Block exists, skip modifying it (create mode)", $identifier));
                     $result->recordSkipped();
                     continue;
@@ -237,17 +246,7 @@ class Blocks implements ComponentInterface
                     $isNew ? $result->recordCreated() : $result->recordUpdated();
                 }
 
-                if ($version) {
-                    if ($dryRun) {
-                        $this->log->logInfo(sprintf(
-                            "[dry-run] Would set version %d for %s",
-                            (int) $version,
-                            $versionId
-                        ));
-                    } else {
-                        $this->versionManagement->setVersion($versionId, (int) $version);
-                    }
-                }
+                $this->gate->commitVersion($request, $dryRun);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());

@@ -11,13 +11,14 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
-use Magebit\Configurator\Api\VersionManagementInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Exception;
-use Magebit\Configurator\Model\Processor;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Cms\Api\Data\PageInterface;
 use Magento\Cms\Api\Data\PageInterfaceFactory;
 use Magento\Cms\Api\PageRepositoryInterface;
@@ -54,7 +55,7 @@ class Pages implements ComponentInterface
         private readonly LoggerInterface            $log,
         private readonly Filesystem                 $filesystem,
         private readonly Escaper $escaper,
-        private readonly VersionManagementInterface $versionManagement,
+        private readonly ReconciliationGate $gate,
         private readonly ObjectManagerInterface $objectManager,
         private readonly ResourceConnection $resourceConnection,
         private readonly MetadataPool $metadataPool,
@@ -74,7 +75,7 @@ class Pages implements ComponentInterface
     {
         $result = new ComponentResult();
         $data = $context->getData();
-        $mode = $context->getMode()->value;
+        $mode = $context->getMode();
 
         if (!is_array($data)) {
             $result->addError('No page data found in the source data.');
@@ -98,7 +99,7 @@ class Pages implements ComponentInterface
      *
      * @param string $identifier
      * @param array $data
-     * @param string $mode
+     * @param ComponentMode $mode
      * @param bool $dryRun
      * @param ComponentResult $result
      * @return void
@@ -108,7 +109,7 @@ class Pages implements ComponentInterface
     protected function processPage(
         string $identifier,
         array $data,
-        string $mode,
+        ComponentMode $mode,
         bool $dryRun,
         ComponentResult $result
     ): void {
@@ -124,20 +125,29 @@ class Pages implements ComponentInterface
                 }
 
                 $version = $pageData['version'] ?? null;
-                $versionId = self::ALIAS . '_' . $identifier;
 
+                // Version key preserves the legacy composition: identifier with the
+                // store codes appended (no separator) when stores are specified.
+                $versionKey = $identifier;
                 if (isset($pageData['stores'])) {
-                    $versionId .= implode('_', $pageData['stores']);
+                    $versionKey .= implode('_', $pageData['stores']);
                 }
 
                 if ($version) {
                     unset($pageData['version']);
                 }
 
+                $request = new ReconciliationRequest(
+                    self::ALIAS,
+                    $versionKey,
+                    $mode,
+                    (bool) $pageId,
+                    $version ? (int) $version : null
+                );
+
                 /** @var PageInterface $page */
                 if ($pageId) {
-                    $isNewVersion = $version && $this->versionManagement->isNewVersion($versionId, (int) $version);
-                    if ($mode === Processor::MODE_CREATE && !$isNewVersion) {
+                    if ($this->gate->decide($request)->isSkip()) {
                         $result->recordSkipped();
                         continue;
                     }
@@ -268,17 +278,7 @@ class Pages implements ComponentInterface
                     $isNew ? $result->recordCreated() : $result->recordUpdated();
                 }
 
-                if ($version) {
-                    if ($dryRun) {
-                        $this->log->logInfo(sprintf(
-                            "[dry-run] Would set version %d for %s",
-                            (int) $version,
-                            $versionId
-                        ));
-                    } else {
-                        $this->versionManagement->setVersion($versionId, (int) $version);
-                    }
-                }
+                $this->gate->commitVersion($request, $dryRun);
             }
         } catch (NoSuchEntityException $e) {
             $this->log->logError($e->getMessage());

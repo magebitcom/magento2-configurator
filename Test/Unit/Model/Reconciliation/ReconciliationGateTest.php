@@ -87,6 +87,15 @@ class ReconciliationGateTest extends TestCase
         $this->assertSame(ReconciliationOutcome::Skip, $this->gate->decide($request));
     }
 
+    public function testUnchangedShortCircuitsEvenWhenExistsIsFalse(): void
+    {
+        // Config maps an existing-but-empty value as exists=false yet unchanged=true;
+        // the gate must still skip (the value already matches).
+        $request = new ReconciliationRequest('config', 'global_k', ComponentMode::Maintain, false, null, true);
+
+        $this->assertSame(ReconciliationOutcome::Skip, $this->gate->decide($request));
+    }
+
     public function testUnknownDiffDoesNotSkipOnUnchangedBasis(): void
     {
         // unchanged = null (caller can't tell) -> must not be treated as unchanged.
