@@ -11,11 +11,13 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Api\ReconciliationOutcome;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Tax\Model\Calculation\RuleFactory;
@@ -27,10 +29,23 @@ use Magento\Tax\Model\ResourceModel\TaxClass as TaxClassResource;
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
  */
-class TaxRules implements ComponentInterface
+class TaxRules implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'taxrules';
     private const DESCRIPTION = 'Component to create Tax Rules';
+
+    /**
+     * Column order of the source CSV (header row). Must match docs/schema/taxrules.md.
+     */
+    private const COLUMNS = [
+        'code',
+        'tax_rate_ids',
+        'customer_tax_class_ids',
+        'product_tax_class_ids',
+        'priority',
+        'calculate_subtotal',
+        'position',
+    ];
 
     /**
      * Defines Customer Tax Class string
@@ -255,6 +270,178 @@ class TaxRules implements ComponentInterface
             sprintf('Tax Rule "%s" %s.', $ruleData['code'], $outcome->value)
         );
         $outcome->record($result);
+    }
+
+    /**
+     * Export tax rules into the source CSV format (list of rows, header first).
+     * Refresh mode rebuilds only the rules already tracked in the source file
+     * (matched by `code`), rewriting each from its current DB state; a tracked
+     * rule no longer present in the DB keeps its existing row unchanged. Full mode
+     * dumps every tax rule, optionally filtered by a `code` prefix.
+     */
+    public function export(ExportContext $context): array
+    {
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData(), $context->getFilter());
+    }
+
+    /**
+     * Rebuild the rows whose `code` is already tracked in the source file, reading
+     * current values from the DB. The header row is preserved (or rebuilt). Tracked
+     * rules with no matching DB rule keep their existing row.
+     *
+     * @param array $existing
+     * @param string|null $filter
+     * @return array
+     */
+    private function refreshTracked(array $existing, ?string $filter): array
+    {
+        if (!isset($existing[0]) || !is_array($existing[0])) {
+            return $existing;
+        }
+
+        $header = $existing[0];
+        $rows = [$header];
+
+        foreach ($existing as $index => $row) {
+            if ($index === 0 || !is_array($row)) {
+                continue;
+            }
+
+            $code = (string) ($row[0] ?? '');
+            if ($code === '' || ($filter !== null && $filter !== '' && !str_starts_with($code, $filter))) {
+                $rows[] = $row;
+                continue;
+            }
+
+            $rule = $this->loadRuleByCode($code);
+            if ($rule === null) {
+                // Tracked rule no longer exists in the DB: keep its existing row.
+                $rows[] = $row;
+                continue;
+            }
+
+            $rows[] = $this->ruleToRow($rule, $header);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Dump every tax rule as source rows, header first. When a `code` prefix
+     * filter is given, only matching rules are exported.
+     *
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        $rows = [self::COLUMNS];
+
+        $collection = $this->ruleFactory->create()->getCollection();
+        if ($filter !== null && $filter !== '') {
+            $collection->addFieldToFilter('code', ['like' => $filter . '%']);
+        }
+
+        foreach ($collection as $item) {
+            $rule = $this->loadRuleByCode((string) $item->getCode());
+            if ($rule === null) {
+                continue;
+            }
+            $rows[] = $this->ruleToRow($rule, self::COLUMNS);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Load a fully-populated rule by code (its tax rate / class id sets are filled
+     * on load), or null when no rule with that code exists.
+     */
+    private function loadRuleByCode(string $code): ?object
+    {
+        $id = $this->ruleFactory->create()->getCollection()
+            ->addFieldToFilter('code', $code)
+            ->getFirstItem()
+            ->getId();
+
+        if (!$id) {
+            return null;
+        }
+
+        $rule = $this->ruleFactory->create();
+        $this->taxRuleResource->load($rule, (int) $id);
+
+        return $rule->getId() ? $rule : null;
+    }
+
+    /**
+     * Build a CSV row for a rule, ordered to match the given header columns. Rate
+     * ids are resolved back to rate codes and tax-class ids back to class names.
+     *
+     * @param object $rule
+     * @param array $header
+     * @return array
+     */
+    private function ruleToRow(object $rule, array $header): array
+    {
+        $values = [
+            'code' => (string) $rule->getCode(),
+            'tax_rate_ids' => $this->rateCodesFromIds((array) $rule->getTaxRateIds()),
+            'customer_tax_class_ids' => $this->classNamesFromIds((array) $rule->getCustomerTaxClassIds()),
+            'product_tax_class_ids' => $this->classNamesFromIds((array) $rule->getProductTaxClassIds()),
+            'priority' => (string) $rule->getPriority(),
+            'calculate_subtotal' => (string) $rule->getCalculateSubtotal(),
+            'position' => (string) $rule->getPosition(),
+        ];
+
+        $row = [];
+        foreach ($header as $column) {
+            $row[] = $values[$column] ?? '';
+        }
+
+        return $row;
+    }
+
+    /**
+     * Resolve tax rate ids back to a comma-separated list of rate codes.
+     *
+     * @param array $rateIds
+     * @return string
+     */
+    private function rateCodesFromIds(array $rateIds): string
+    {
+        $codes = [];
+        foreach ($rateIds as $rateId) {
+            $rate = $this->rateFactory->create();
+            $rate->load((int) $rateId);
+            if ($rate->getId()) {
+                $codes[] = (string) $rate->getCode();
+            }
+        }
+
+        return implode(',', $codes);
+    }
+
+    /**
+     * Resolve tax-class ids back to a comma-separated list of class names.
+     *
+     * @param array $classIds
+     * @return string
+     */
+    private function classNamesFromIds(array $classIds): string
+    {
+        $names = [];
+        foreach ($classIds as $classId) {
+            $class = $this->classModelFactory->create();
+            $this->taxClassResource->load($class, (int) $classId);
+            if ($class->getId()) {
+                $names[] = (string) $class->getClassName();
+            }
+        }
+
+        return implode(',', $names);
     }
 
     public function getAlias(): string

@@ -20,6 +20,7 @@
             <argument name="commands" xsi:type="array">
                 <item name="configurator:list" xsi:type="object">Magebit\Configurator\Console\Command\ListCommand</item>
                 <item name="configurator:run" xsi:type="object">Magebit\Configurator\Console\Command\RunCommand</item>
+                <item name="configurator:sync-from-db" xsi:type="object">Magebit\Configurator\Console\Command\SyncFromDbCommand</item>
             </argument>
         </arguments>
     </type>

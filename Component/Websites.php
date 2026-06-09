@@ -12,10 +12,12 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\ComponentMode;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Store\Model\Group;
@@ -27,7 +29,7 @@ use Magento\Store\Model\WebsiteFactory;
 use Magento\Indexer\Model\IndexerFactory;
 use Magento\Framework\Event\ManagerInterface;
 
-class Websites implements ComponentInterface
+class Websites implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'websites';
     private const DESCRIPTION = 'Component to manage Websites, Stores and Store Views';
@@ -485,6 +487,273 @@ class Websites implements ComponentInterface
             $this->log->logError($e->getMessage(), $logNest);
             $result->addError($e->getMessage());
         }
+    }
+
+    /**
+     * Export the current store hierarchy into the source format. Refresh mode
+     * rewrites only the websites/groups/store-views already tracked in the source
+     * file (refreshing their scalar fields from the DB, preserving tracked entries
+     * whose record no longer exists); full mode dumps every website in the DB
+     * (optionally filtered by a website-code prefix).
+     */
+    public function export(ExportContext $context): array
+    {
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData());
+    }
+
+    /**
+     * Rebuild every website in the DB in the source format, optionally limited to
+     * websites whose code starts with the given filter.
+     *
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        $out = [];
+        $collection = $this->websiteFactory->create()->getCollection();
+
+        foreach ($collection as $website) {
+            $code = (string) $website->getCode();
+            if ($filter !== null && $filter !== '' && !str_starts_with($code, $filter)) {
+                continue;
+            }
+
+            $out['websites'][$code] = $this->buildWebsite($website);
+        }
+
+        return ['websites' => $out['websites'] ?? []];
+    }
+
+    /**
+     * Walk the tracked source structure and refresh each tracked website/group/
+     * store-view from the DB. Tracked entries whose record no longer exists are
+     * kept untouched. Non-value keys carried in the source are preserved.
+     *
+     * @param array $existing
+     * @return array
+     */
+    private function refreshTracked(array $existing): array
+    {
+        if (!isset($existing['websites']) || !is_array($existing['websites'])) {
+            return $existing;
+        }
+
+        $out = $existing;
+
+        foreach ($existing['websites'] as $code => $websiteEntry) {
+            $website = $this->websiteFactory->create();
+            $website->load((string) $code, 'code');
+
+            if (!$website->getId()) {
+                // Record no longer exists in the DB; keep the tracked entry as-is.
+                continue;
+            }
+
+            $out['websites'][$code] = $this->refreshWebsiteEntry((array) $websiteEntry, $website);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Refresh a tracked website entry's scalar fields and its tracked store groups
+     * from the live website model, preserving the entry's existing key set.
+     *
+     * @param array $entry
+     * @param Website $website
+     * @return array
+     */
+    private function refreshWebsiteEntry(array $entry, Website $website): array
+    {
+        foreach ($entry as $key => $value) {
+            if ($key === 'store_groups' || is_array($value)) {
+                continue;
+            }
+            $current = $website->getData((string) $key);
+            if ($current !== null) {
+                $entry[$key] = $current;
+            }
+        }
+
+        if (isset($entry['store_groups']) && is_array($entry['store_groups'])) {
+            foreach ($entry['store_groups'] as $i => $groupEntry) {
+                if (!is_array($groupEntry)) {
+                    continue;
+                }
+                $group = $this->loadGroupForEntry($groupEntry, $website);
+                if ($group === null || !$group->getId()) {
+                    continue;
+                }
+                $entry['store_groups'][$i] = $this->refreshGroupEntry($groupEntry, $group);
+            }
+        }
+
+        return $entry;
+    }
+
+    /**
+     * Refresh a tracked store-group entry's scalar fields and its tracked store
+     * views from the live group model, preserving the entry's existing key set.
+     *
+     * @param array $entry
+     * @param Group $group
+     * @return array
+     */
+    private function refreshGroupEntry(array $entry, Group $group): array
+    {
+        foreach ($entry as $key => $value) {
+            if ($key === 'store_views' || $key === 'default_store' || is_array($value)) {
+                continue;
+            }
+            $current = $group->getData((string) $key);
+            if ($current !== null) {
+                $entry[$key] = $current;
+            }
+        }
+
+        if (array_key_exists('default_store', $entry)) {
+            $defaultStore = $group->getDefaultStore();
+            if ($defaultStore && $defaultStore->getId()) {
+                $entry['default_store'] = (string) $defaultStore->getCode();
+            }
+        }
+
+        if (isset($entry['store_views']) && is_array($entry['store_views'])) {
+            foreach ($entry['store_views'] as $viewCode => $viewEntry) {
+                if (!is_array($viewEntry)) {
+                    continue;
+                }
+                $storeView = $this->storeFactory->create();
+                $storeView->load((string) $viewCode, 'code');
+                if (!$storeView->getId()) {
+                    continue;
+                }
+                $entry['store_views'][$viewCode] = $this->refreshStoreViewEntry($viewEntry, $storeView);
+            }
+        }
+
+        return $entry;
+    }
+
+    /**
+     * Refresh a tracked store-view entry's scalar fields from the live store model.
+     *
+     * @param array $entry
+     * @param Store $storeView
+     * @return array
+     */
+    private function refreshStoreViewEntry(array $entry, Store $storeView): array
+    {
+        foreach ($entry as $key => $value) {
+            if (is_array($value)) {
+                continue;
+            }
+            $current = $storeView->getData((string) $key);
+            if ($current !== null) {
+                $entry[$key] = $current;
+            }
+        }
+
+        return $entry;
+    }
+
+    /**
+     * Build a full website entry (name + scalar columns + nested store groups) in
+     * the source format from a live website model.
+     *
+     * @param Website $website
+     * @return array
+     */
+    private function buildWebsite(Website $website): array
+    {
+        $entry = [
+            'name' => (string) $website->getName(),
+        ];
+
+        $storeGroups = [];
+        foreach ($website->getGroups() as $group) {
+            $storeGroups[] = $this->buildGroup($group);
+        }
+        $entry['store_groups'] = $storeGroups;
+
+        return $entry;
+    }
+
+    /**
+     * Build a full store-group entry (name + root category + default store +
+     * nested store views) in the source format from a live group model.
+     *
+     * @param Group $group
+     * @return array
+     */
+    private function buildGroup(Group $group): array
+    {
+        $entry = [
+            'group_id' => (int) $group->getId(),
+            'name' => (string) $group->getName(),
+            'root_category_id' => (int) $group->getRootCategoryId(),
+        ];
+
+        $defaultStore = $group->getDefaultStore();
+        if ($defaultStore && $defaultStore->getId()) {
+            $entry['default_store'] = (string) $defaultStore->getCode();
+        }
+
+        $storeViews = [];
+        foreach ($group->getStores() as $store) {
+            $storeViews[(string) $store->getCode()] = $this->buildStoreView($store);
+        }
+        $entry['store_views'] = $storeViews;
+
+        return $entry;
+    }
+
+    /**
+     * Build a full store-view entry (name + active flag) in the source format from
+     * a live store model.
+     *
+     * @param Store $store
+     * @return array
+     */
+    private function buildStoreView(Store $store): array
+    {
+        return [
+            'name' => (string) $store->getName(),
+            'is_active' => (int) $store->getIsActive(),
+        ];
+    }
+
+    /**
+     * Load the store group for a tracked group entry, mirroring execute(): by
+     * `group_id` when present, otherwise by `name`. Restricted to the given website.
+     *
+     * @param array $entry
+     * @param Website $website
+     * @return Group|null
+     */
+    private function loadGroupForEntry(array $entry, Website $website): ?Group
+    {
+        if (isset($entry['group_id'])) {
+            $group = $this->groupFactory->create();
+            $group->load($entry['group_id']);
+            return $group->getId() ? $group : null;
+        }
+
+        if (!isset($entry['name'])) {
+            return null;
+        }
+
+        // Resolve by name within the website's groups to avoid cross-website clashes.
+        foreach ($website->getGroups() as $group) {
+            if ((string) $group->getName() === (string) $entry['name']) {
+                return $group;
+            }
+        }
+
+        return null;
     }
 
     public function getAlias(): string

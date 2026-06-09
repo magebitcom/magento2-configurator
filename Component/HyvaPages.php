@@ -11,10 +11,12 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Cms\Model\PageFactory as CmsPageFactory;
@@ -33,7 +35,7 @@ use Magento\Framework\ObjectManagerInterface;
  * directly (which also avoids the JSON double-escaping the Hyvä model performs).
  * When the module is absent the component is a no-op (and di:compile is unaffected).
  */
-class HyvaPages implements ComponentInterface
+class HyvaPages implements ComponentInterface, ExportableComponentInterface
 {
     private const ALIAS = 'hyva_pages';
     private const DESCRIPTION = 'Component to create/maintain Hyvä CMS page-builder content (requires Hyva_CmsMagento).';
@@ -294,6 +296,142 @@ class HyvaPages implements ComponentInterface
         } catch (\Throwable $e) {
             $this->log->logError(sprintf('Failed to create Hyvä version history: %s', $e->getMessage()));
         }
+    }
+
+    /**
+     * Export current Hyvä CMS page-builder content into the source format. Refresh
+     * mode rewrites only the CMS page identifiers already tracked in the source
+     * file; full mode dumps every `hyva_commerce_cms_page` row (optionally filtered
+     * by a CMS page identifier prefix). Returns [] when the Hyvä module is disabled,
+     * mirroring execute()'s guard. There are no secrets to skip for this component.
+     */
+    public function export(ExportContext $context): array
+    {
+        if (!$this->moduleManager->isEnabled(self::HYVA_MODULE)) {
+            $this->log->logComment(sprintf('%s is not installed; skipping Hyvä CMS pages export.', self::HYVA_MODULE));
+            return [];
+        }
+
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData(), $context->getFilter());
+    }
+
+    /**
+     * Refresh each tracked identifier's content/liveview flag from the DB,
+     * preserving any non-value keys (version, create_version_history, …). Tracked
+     * identifiers that no longer resolve to a CMS page (or have no Hyvä row) are
+     * kept untouched. Identifiers not matching the filter are kept untouched.
+     *
+     * @param array $existing
+     * @param string|null $filter
+     * @return array
+     */
+    private function refreshTracked(array $existing, ?string $filter): array
+    {
+        $out = [];
+        foreach ($existing as $identifier => $entry) {
+            $id = (string) $identifier;
+            $entry = (array) $entry;
+
+            if ($filter !== null && $filter !== '' && !str_starts_with($id, $filter)) {
+                $out[$id] = $entry;
+                continue;
+            }
+
+            $cmsPageId = $this->findCmsPageId($id);
+            if ($cmsPageId === null) {
+                $out[$id] = $entry;
+                continue;
+            }
+
+            $row = $this->loadExisting('cms_page_id', $cmsPageId);
+            if ($row === false) {
+                $out[$id] = $entry;
+                continue;
+            }
+
+            $out[$id] = $this->applyRowToEntry($entry, $row);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Update the value-bearing keys of an existing tracked entry from a DB row,
+     * preserving its content shape (shared `content`/`content_source` vs separate
+     * draft/published variants) and any non-value keys (version, version_name, …).
+     *
+     * @param array<string, mixed> $entry
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function applyRowToEntry(array $entry, array $row): array
+    {
+        $draft = (string) ($row['draft_content'] ?? '');
+        $published = (string) ($row['published_content'] ?? '');
+
+        // *_source keys reference external files we cannot rewrite here, so they are
+        // preserved untouched; only inline content keys and the liveview flag are refreshed.
+        if (array_key_exists('content', $entry)) {
+            // Shared inline content maps to both draft and published; prefer published.
+            $entry['content'] = $published;
+        }
+        if (array_key_exists('draft_content', $entry)) {
+            $entry['draft_content'] = $draft;
+        }
+        if (array_key_exists('published_content', $entry)) {
+            $entry['published_content'] = $published;
+        }
+
+        if (array_key_exists('is_liveview_enabled', $entry)) {
+            $entry['is_liveview_enabled'] = (bool) (int) ($row['is_liveview_enabled'] ?? 0);
+        }
+
+        return $entry;
+    }
+
+    /**
+     * Dump every Hyvä CMS page row in the source format, keyed by CMS page
+     * identifier. Optionally filtered by an identifier prefix.
+     *
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        $connection = $this->resourceConnection->getConnection();
+        $hyvaTable = $this->resourceConnection->getTableName(self::TABLE);
+        $cmsTable = $this->resourceConnection->getTableName('cms_page');
+
+        $select = $connection->select()
+            ->from(['h' => $hyvaTable], ['draft_content', 'published_content', 'is_liveview_enabled'])
+            ->join(['c' => $cmsTable], 'c.page_id = h.cms_page_id', ['identifier'])
+            ->where('h.cms_page_id IS NOT NULL');
+
+        if ($filter !== null && $filter !== '') {
+            $select->where('c.identifier LIKE ?', $filter . '%');
+        }
+
+        $out = [];
+        foreach ($connection->fetchAll($select) as $row) {
+            $identifier = (string) $row['identifier'];
+            $draft = (string) ($row['draft_content'] ?? '');
+            $published = (string) ($row['published_content'] ?? '');
+
+            $entry = ['is_liveview_enabled' => (bool) (int) ($row['is_liveview_enabled'] ?? 0)];
+
+            if ($draft === $published) {
+                $entry['content'] = $published;
+            } else {
+                $entry['draft_content'] = $draft;
+                $entry['published_content'] = $published;
+            }
+
+            $out[$identifier] = $entry;
+        }
+
+        return $out;
     }
 
     public function getAlias(): string

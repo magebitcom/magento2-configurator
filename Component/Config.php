@@ -12,10 +12,12 @@ namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
 use Magebit\Configurator\Api\ComponentMode;
+use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Config\Model\Config\Backend\Encrypted;
@@ -29,7 +31,7 @@ use Magento\Store\Model\StoreFactory;
 use Magento\Store\Model\WebsiteFactory;
 use Magento\Theme\Model\ResourceModel\Theme\CollectionFactory;
 
-class Config implements ComponentInterface
+class Config implements ComponentInterface, ExportableComponentInterface
 {
     public const PATH_THEME_ID = 'design/theme/theme_id';
     public const ENCRYPTED_MODEL = Encrypted::class;
@@ -434,6 +436,164 @@ class Config implements ComponentInterface
     private function encrypt($value): string
     {
         return $this->encryptor->encrypt($value);
+    }
+
+    /**
+     * Export current config values into the source format. Refresh mode rewrites
+     * only the paths already tracked in the source file; full mode dumps every
+     * core_config_data row (optionally filtered by a path prefix). Encrypted
+     * paths are never written out, so secrets don't land in version control.
+     */
+    public function export(ExportContext $context): array
+    {
+        return $context->isFullExport()
+            ? $this->exportAll($context->getFilter())
+            : $this->refreshTracked($context->getExistingData(), $context->getFilter());
+    }
+
+    /**
+     * @param array $existing
+     * @param string|null $filter
+     * @return array
+     */
+    private function refreshTracked(array $existing, ?string $filter): array
+    {
+        $out = [];
+
+        if (isset($existing['global']) && is_array($existing['global'])) {
+            $out['global'] = $this->refreshEntries(
+                $existing['global'],
+                ScopeConfigInterface::SCOPE_TYPE_DEFAULT,
+                0,
+                $filter
+            );
+        }
+
+        foreach (['websites', 'stores'] as $scope) {
+            if (!isset($existing[$scope]) || !is_array($existing[$scope])) {
+                continue;
+            }
+            foreach ($existing[$scope] as $code => $entries) {
+                $scopeId = $this->resolveScopeId($scope, (string) $code);
+                if ($scopeId === null) {
+                    $out[$scope][$code] = $entries;
+                    continue;
+                }
+                $out[$scope][$code] = $this->refreshEntries((array) $entries, $scope, $scopeId, $filter);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Refresh the `value` of each tracked entry from the DB, preserving any
+     * other keys (version, encryption). Entries that don't match the filter, or
+     * use an encrypted backend model, are kept untouched.
+     *
+     * @param array $entries
+     * @return array
+     */
+    private function refreshEntries(array $entries, string $scope, int $scopeId, ?string $filter): array
+    {
+        $result = [];
+        foreach ($entries as $entry) {
+            $path = $entry['path'] ?? null;
+            if ($path === null
+                || ($filter !== null && !str_starts_with((string) $path, $filter))
+                || $this->isEncryptedPath((string) $path)
+            ) {
+                $result[] = $entry;
+                continue;
+            }
+
+            $current = $this->getSetConfigValue((string) $path, $scope, $scopeId);
+            if ($current !== false) {
+                $entry['value'] = $current;
+            }
+            $result[] = $entry;
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param string|null $filter
+     * @return array
+     */
+    private function exportAll(?string $filter): array
+    {
+        $collection = $this->configValueFactory->create();
+        if ($filter !== null && $filter !== '') {
+            $collection->addFieldToFilter('path', ['like' => $filter . '%']);
+        }
+
+        $out = [];
+        foreach ($collection as $config) {
+            $path = (string) $config->getPath();
+            if ($this->isEncryptedPath($path)) {
+                continue;
+            }
+
+            $scope = (string) $config->getScope();
+            $scopeId = (int) $config->getScopeId();
+            $entry = ['path' => $path, 'value' => $config->getValue()];
+
+            if ($scope === ScopeConfigInterface::SCOPE_TYPE_DEFAULT || $scopeId === 0) {
+                $out['global'][] = $entry;
+                continue;
+            }
+
+            $code = $scope === 'websites' ? $this->websiteCodeById($scopeId) : $this->storeCodeById($scopeId);
+            if ($code !== null) {
+                $out[$scope][$code][] = $entry;
+            }
+        }
+
+        return $out;
+    }
+
+    private function resolveScopeId(string $scope, string $code): ?int
+    {
+        if ($scope === 'websites') {
+            $website = $this->websiteFactory->create();
+            $website->load($code, 'code');
+            return $website->getId() ? (int) $website->getId() : null;
+        }
+
+        $store = $this->storeFactory->create();
+        $store->load($code, 'code');
+        return $store->getId() ? (int) $store->getId() : null;
+    }
+
+    private function websiteCodeById(int $scopeId): ?string
+    {
+        $website = $this->websiteFactory->create()->load($scopeId);
+        return $website->getId() ? (string) $website->getCode() : null;
+    }
+
+    private function storeCodeById(int $scopeId): ?string
+    {
+        $store = $this->storeFactory->create()->load($scopeId);
+        return $store->getId() ? (string) $store->getCode() : null;
+    }
+
+    /**
+     * Whether a config path uses the encrypted backend model (so we never write
+     * its decrypted value into a source file).
+     */
+    private function isEncryptedPath(string $path): bool
+    {
+        foreach ($this->initialConfig->getMetadata() as $metaPath => $processor) {
+            if ($metaPath === $path
+                && isset($processor['backendModel'])
+                && $processor['backendModel'] === self::ENCRYPTED_MODEL
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function getAlias(): string
