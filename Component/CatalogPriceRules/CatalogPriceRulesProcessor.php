@@ -8,8 +8,11 @@
 
 namespace Magebit\Configurator\Component\CatalogPriceRules;
 
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\ComponentProcessorInterface;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\CatalogRule\Api\CatalogRuleRepositoryInterface;
 use Magento\CatalogRule\Api\Data\RuleInterfaceFactory;
 use Magento\CatalogRule\Model\Rule;
@@ -51,23 +54,48 @@ class CatalogPriceRulesProcessor implements ComponentProcessorInterface
     private $logger;
 
     /**
+     * @var ReconciliationGate
+     */
+    private $gate;
+
+    /**
+     * @var ComponentMode
+     */
+    private $mode = ComponentMode::Maintain;
+
+    /**
      * CatalogPriceRules constructor.
      *
      * @param LoggerInterface $logger
      * @param RuleInterfaceFactory $ruleFactory
      * @param CatalogRuleRepositoryInterface $catalogRuleRepo
      * @param Job $ruleJob
+     * @param ReconciliationGate $gate
      */
     public function __construct(
         LoggerInterface $logger,
         RuleInterfaceFactory $ruleFactory,
         CatalogRuleRepositoryInterface $catalogRuleRepo,
-        Job $ruleJob
+        Job $ruleJob,
+        ReconciliationGate $gate
     ) {
         $this->logger = $logger;
         $this->ruleFactory = $ruleFactory;
         $this->catalogRuleRepo = $catalogRuleRepo;
         $this->ruleJob = $ruleJob;
+        $this->gate = $gate;
+    }
+
+    /**
+     * @param ComponentMode $mode
+     *
+     * @return $this
+     */
+    public function setMode(ComponentMode $mode)
+    {
+        $this->mode = $mode;
+
+        return $this;
     }
 
     /**
@@ -127,10 +155,30 @@ class CatalogPriceRulesProcessor implements ComponentProcessorInterface
             // Get the first rule
             $rule = $ruleCollection->getFirstItem();
 
+            $version = $ruleData['version'] ?? null;
+            $request = new ReconciliationRequest(
+                'catalog_price_rules',
+                (string) $ruleData['name'],
+                $this->mode,
+                $rule->getId() !== null,
+                $version ? (int) $version : null
+            );
+
+            if ($this->gate->decide($request)->isSkip()) {
+                $this->logger->logComment(
+                    sprintf('Rule "%s" exists, skipped (create mode)', $ruleData['name']),
+                    1
+                );
+                $ite++;
+                continue;
+            }
+
             // If the rule does not exist, create a new one
             if ($rule->getId() === null) {
                 $rule = $this->ruleFactory->create();
             }
+
+            unset($ruleData['version']);
 
             /** @var Rule $rule */
             $this->fillRuleWithData($rule, $ruleData);
@@ -138,6 +186,7 @@ class CatalogPriceRulesProcessor implements ComponentProcessorInterface
             try {
                 // Save the rule
                 $this->catalogRuleRepo->save($rule);
+                $this->gate->commitVersion($request, false);
             } catch (\Exception $ex) {
                 $this->logger->logError($ex->getMessage());
             }

@@ -11,10 +11,13 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Authorization\Model\Acl\Role\Group as RoleGroup;
 use Magento\Authorization\Model\ResourceModel\Role as RoleResource;
 use Magento\Authorization\Model\RoleFactory;
@@ -35,7 +38,8 @@ class AdminRoles implements ComponentInterface
         private readonly RoleFactory $roleFactory,
         private readonly RoleResource $roleResource,
         private readonly RulesFactory $rulesFactory,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -54,7 +58,14 @@ class AdminRoles implements ComponentInterface
                 if (!isset($role['name'])) {
                     throw new ComponentException((string) __('An adminroles entry is missing the "name" key.'));
                 }
-                $this->createAdminRole($role['name'], $role['resources'] ?? null, $context->isDryRun(), $result);
+                $this->createAdminRole(
+                    $role['name'],
+                    $role['resources'] ?? null,
+                    $context->getMode(),
+                    $role['version'] ?? null,
+                    $context->isDryRun(),
+                    $result
+                );
             } catch (ComponentException $e) {
                 $this->log->logError($e->getMessage());
                 $result->addError($e->getMessage());
@@ -73,21 +84,36 @@ class AdminRoles implements ComponentInterface
     private function createAdminRole(
         string $roleName,
         ?array $resources,
+        ComponentMode $mode,
+        ?string $version,
         bool $dryRun,
         ComponentResult $result
     ): void {
         $role = $this->roleFactory->create();
         $existing = $role->getCollection()->addFieldToFilter('role_name', $roleName)->getFirstItem();
+        $exists = (bool) $existing->getId();
 
-        if ($existing->getId()) {
-            $this->log->logInfo(sprintf('Admin Role "%s" already exists, creation skipped', $roleName));
+        $request = new ReconciliationRequest(self::ALIAS, $roleName, $mode, $exists, $version ? (int) $version : null);
+
+        if ($this->gate->decide($request)->isSkip()) {
+            // In create mode an existing role (and its resources) is left untouched.
+            $this->log->logInfo(sprintf('Admin Role "%s" exists, skipped (create mode)', $roleName));
             $result->recordSkipped();
+            return;
+        }
+
+        // Existing role in maintain mode (or a version bump): reconcile its resources.
+        if ($exists) {
             $this->setResourceIds($existing, $resources, $dryRun);
+            $this->gate->commitVersion($request, $dryRun);
+            $result->recordUpdated();
             return;
         }
 
         if ($dryRun) {
             $this->log->logInfo(sprintf('[dry-run] Would create Admin Role "%s"', $roleName));
+            $this->setResourceIds($existing, $resources, $dryRun);
+            $this->gate->commitVersion($request, $dryRun);
             $result->recordCreated();
             return;
         }
@@ -101,8 +127,9 @@ class AdminRoles implements ComponentInterface
             ->setSortOrder(0);
         $this->roleResource->save($role);
 
-        $result->recordCreated();
         $this->setResourceIds($role, $resources, $dryRun);
+        $this->gate->commitVersion($request, $dryRun);
+        $result->recordCreated();
     }
 
     /**

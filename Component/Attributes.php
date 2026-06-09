@@ -11,10 +11,13 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Catalog\Model\Product;
 use Magento\Eav\Api\AttributeRepositoryInterface;
 use Magento\Eav\Setup\EavSetup;
@@ -95,7 +98,8 @@ class Attributes implements ComponentInterface
         protected readonly AttributeRepositoryInterface $attributeRepository,
         protected readonly LoggerInterface $log,
         protected readonly AttrOptionCollectionFactory $attrOptionCollectionFactory,
-        protected readonly EavConfig $eavConfig
+        protected readonly EavConfig $eavConfig,
+        protected readonly ReconciliationGate $gate
     ) {
     }
 
@@ -111,7 +115,13 @@ class Attributes implements ComponentInterface
 
         try {
             foreach ($data['attributes'] as $attributeCode => $attributeConfiguration) {
-                $this->processAttribute($attributeCode, $attributeConfiguration, $context->isDryRun(), $result);
+                $this->processAttribute(
+                    $attributeCode,
+                    $attributeConfiguration,
+                    $context->getMode(),
+                    $context->isDryRun(),
+                    $result
+                );
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -128,6 +138,7 @@ class Attributes implements ComponentInterface
     protected function processAttribute(
         $attributeCode,
         array $attributeConfig,
+        ComponentMode $mode,
         bool $dryRun,
         ComponentResult $result
     ): void {
@@ -148,11 +159,24 @@ class Attributes implements ComponentInterface
             }
         }
 
-        if (!$this->updateAttribute) {
-            $this->log->logComment(sprintf('No update required for attribute %s.', $attributeCode));
+        $version = $attributeConfig['version'] ?? null;
+        $request = new ReconciliationRequest(
+            $this->getAlias(),
+            (string) $attributeCode,
+            $mode,
+            $this->attributeExists,
+            $version ? (int) $version : null,
+            $this->attributeExists ? !$this->updateAttribute : null
+        );
+
+        if ($this->gate->decide($request)->isSkip()) {
+            $this->log->logComment(sprintf('No update for attribute %s (unchanged or create mode).', $attributeCode));
             $result->recordSkipped();
             return;
         }
+
+        // Keep the version marker out of the EAV attribute config.
+        unset($attributeConfig['version']);
 
         if (!array_key_exists('user_defined', $attributeConfig)) {
             $attributeConfig['user_defined'] = 1;
@@ -181,6 +205,7 @@ class Attributes implements ComponentInterface
 
         if ($this->attributeExists) {
             $this->log->logInfo(sprintf('Attribute %s updated.', $attributeCode));
+            $this->gate->commitVersion($request, $dryRun);
             $result->recordUpdated();
             return;
         }
@@ -195,6 +220,7 @@ class Attributes implements ComponentInterface
         //swatch functionality
 
         $this->log->logInfo(sprintf('Attribute %s created.', $attributeCode));
+        $this->gate->commitVersion($request, $dryRun);
         $result->recordCreated();
     }
 

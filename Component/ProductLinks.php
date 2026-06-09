@@ -17,6 +17,8 @@ use Magento\Catalog\Api\Data\ProductLinkInterfaceFactory;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 
 class ProductLinks implements ComponentInterface
 {
@@ -32,7 +34,8 @@ class ProductLinks implements ComponentInterface
     public function __construct(
         private readonly ProductRepositoryInterface $productRepository,
         private readonly ProductLinkInterfaceFactory $productLinkFactory,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -120,6 +123,31 @@ class ProductLinks implements ComponentInterface
         ComponentResult $result
     ): void {
         try {
+            // Treat the (product, link type) pair as the entity: in create mode an
+            // existing set of links of this type is left untouched, so we don't
+            // overwrite live link data unless maintaining.
+            $product = $this->productRepository->get($sku);
+            $existingOfType = array_filter(
+                $product->getProductLinks(),
+                fn ($link): bool => $link->getLinkType() === $this->linkTypeMap[$linkType]
+            );
+
+            $request = new ReconciliationRequest(
+                self::ALIAS,
+                $sku . '_' . $linkType,
+                $context->getMode(),
+                $existingOfType !== []
+            );
+
+            if ($this->gate->decide($request)->isSkip()) {
+                $this->log->logComment(
+                    sprintf('Product %s already has %s links, skipped (create mode)', $sku, $linkType),
+                    1
+                );
+                $result->recordSkipped();
+                return;
+            }
+
             $productLinks = [];
 
             // Loop through all the products that require linking to a product
@@ -144,8 +172,7 @@ class ProductLinks implements ComponentInterface
                 return;
             }
 
-            // Save product links onto the main product
-            $product = $this->productRepository->get($sku);
+            // Save product links onto the main product (loaded above for the gate check)
             $product->setProductLinks($productLinks);
             $this->productRepository->save($product);
             $this->log->logComment(sprintf('Saved product links for %s', $sku), 1);

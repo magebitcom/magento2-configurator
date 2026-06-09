@@ -11,12 +11,13 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
-use Magebit\Configurator\Api\VersionManagementInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
-use Magebit\Configurator\Model\Processor;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Config\Model\Config\Backend\Encrypted;
 use Magento\Config\Model\ResourceModel\Config as ConfigResource;
 use Magento\Config\Model\ResourceModel\Config\Data\CollectionFactory as ConfigCollectionFactory;
@@ -45,7 +46,7 @@ class Config implements ComponentInterface
         protected readonly WebsiteFactory $websiteFactory,
         protected readonly StoreFactory $storeFactory,
         private readonly LoggerInterface $log,
-        private readonly VersionManagementInterface $versionManagement,
+        private readonly ReconciliationGate $gate,
         private readonly ConfigCollectionFactory $configValueFactory
     ) {
     }
@@ -58,7 +59,7 @@ class Config implements ComponentInterface
     {
         $result = new ComponentResult();
         $data = $context->getData();
-        $mode = $context->getMode()->value;
+        $mode = $context->getMode();
         $dryRun = $context->isDryRun();
 
         if ($data === [] || !is_array($data)) {
@@ -179,7 +180,7 @@ class Config implements ComponentInterface
         string $path,
         mixed $value = null,
         int $encrypted = 0,
-        string $mode = Processor::MODE_MAINTAIN,
+        ComponentMode $mode = ComponentMode::Maintain,
         ?string $version = null,
         bool $dryRun = false,
         ?ComponentResult $result = null
@@ -188,13 +189,17 @@ class Config implements ComponentInterface
             // Check existing value, skip if the same
             $scope = ScopeConfigInterface::SCOPE_TYPE_DEFAULT;
             $existingValue = $this->getSetConfigValue($path, $scope, 0);
-            $versionId = self::ALIAS . '_global_' . $path;
 
-            $isNewVersion = isset($version) && $this->versionManagement->isNewVersion($versionId, (int) $version);
+            $request = new ReconciliationRequest(
+                self::ALIAS,
+                'global_' . $path,
+                $mode,
+                (bool) $existingValue,
+                $version ? (int) $version : null,
+                $existingValue !== false && $value == $existingValue
+            );
 
-            if (($existingValue !== false && $value == $existingValue) ||
-                ($existingValue && $mode == Processor::MODE_CREATE && !$isNewVersion)
-            ) {
+            if ($this->gate->decide($request)->isSkip()) {
                 $this->log->logComment(sprintf("Global Config Already Has Value: %s = %s", $path, $existingValue));
                 $result?->recordSkipped();
                 return;
@@ -213,9 +218,7 @@ class Config implements ComponentInterface
             // Save the config
             $this->configResource->saveConfig($path, $value, $scope, 0);
             $this->log->logInfo(sprintf("Global Config: %s = %s", $path, $value));
-            if ($version) {
-                $this->versionManagement->setVersion($versionId, (int) $version);
-            }
+            $this->gate->commitVersion($request, $dryRun);
             $result?->recordCreated();
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -231,7 +234,7 @@ class Config implements ComponentInterface
         mixed $value,
         string $code,
         int $encrypted = 0,
-        string $mode = Processor::MODE_MAINTAIN,
+        ComponentMode $mode = ComponentMode::Maintain,
         ?string $version = null,
         bool $dryRun = false,
         ?ComponentResult $result = null
@@ -251,12 +254,17 @@ class Config implements ComponentInterface
 
             // Check existing value, skip if the same
             $existingValue = $this->getSetConfigValue($path, $scope, (int) $website->getId());
-            $versionId = self::ALIAS . '_website_' . $website->getId() . '_' . $path;
-            $isNewVersion = isset($version) && $this->versionManagement->isNewVersion($versionId, (int) $version);
 
-            if (($existingValue !== false && $value == $existingValue) ||
-                ($existingValue && $mode == Processor::MODE_CREATE && !$isNewVersion)
-            ) {
+            $request = new ReconciliationRequest(
+                self::ALIAS,
+                'website_' . $website->getId() . '_' . $path,
+                $mode,
+                (bool) $existingValue,
+                $version ? (int) $version : null,
+                $existingValue !== false && $value == $existingValue
+            );
+
+            if ($this->gate->decide($request)->isSkip()) {
                 $this->log->logComment(
                     sprintf("Website '%s' Config Already: %s = %s", $code, $path, $existingValue),
                     $logNest
@@ -281,9 +289,7 @@ class Config implements ComponentInterface
             // Save the config
             $this->configResource->saveConfig($path, $value, $scope, (int) $website->getId());
             $this->log->logInfo(sprintf("Website '%s' Config: %s = %s", $code, $path, $value), $logNest);
-            if ($version) {
-                $this->versionManagement->setVersion($versionId, (int) $version);
-            }
+            $this->gate->commitVersion($request, $dryRun);
             $result?->recordCreated();
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -315,7 +321,7 @@ class Config implements ComponentInterface
         mixed $value,
         string $code,
         int $encrypted = 0,
-        string $mode = Processor::MODE_MAINTAIN,
+        ComponentMode $mode = ComponentMode::Maintain,
         ?string $version = null,
         bool $dryRun = false,
         ?ComponentResult $result = null
@@ -334,11 +340,17 @@ class Config implements ComponentInterface
 
             // Check existing value, skip if the same
             $existingValue = $this->getSetConfigValue($path, $scope, (int) $storeView->getId());
-            $versionId = self::ALIAS . '_store_' . $storeView->getId() . '_' . $path;
-            $isNewVersion = isset($version) && $this->versionManagement->isNewVersion($versionId, (int) $version);
 
-            if (($existingValue !== false && $value == $existingValue) ||
-                ($existingValue && $mode == Processor::MODE_CREATE && !$isNewVersion)) {
+            $request = new ReconciliationRequest(
+                self::ALIAS,
+                'store_' . $storeView->getId() . '_' . $path,
+                $mode,
+                (bool) $existingValue,
+                $version ? (int) $version : null,
+                $existingValue !== false && $value == $existingValue
+            );
+
+            if ($this->gate->decide($request)->isSkip()) {
                 $this->log->logComment(
                     sprintf("Store '%s' Config Already: %s = %s", $code, $path, $existingValue),
                     $logNest
@@ -362,9 +374,7 @@ class Config implements ComponentInterface
 
             $this->configResource->saveConfig($path, $value, $scope, (int) $storeView->getId());
             $this->log->logInfo(sprintf("Store '%s' Config: %s = %s", $code, $path, $value), $logNest);
-            if ($version) {
-                $this->versionManagement->setVersion($versionId, (int) $version);
-            }
+            $this->gate->commitVersion($request, $dryRun);
             $result?->recordCreated();
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());

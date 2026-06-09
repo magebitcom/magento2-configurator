@@ -59,6 +59,7 @@ class CatalogPriceRules implements ComponentInterface
 
         $this->processor->setData($rules)
             ->setConfig($config)
+            ->setMode($context->getMode())
             ->process();
 
         $result->recordCreated($ruleCount);

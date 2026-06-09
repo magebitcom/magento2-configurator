@@ -11,10 +11,13 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\UrlRewrite\Model\UrlRewriteFactory;
 use Magento\UrlRewrite\Model\UrlPersistInterface;
 use Magento\UrlRewrite\Model\ResourceModel\UrlRewrite as UrlRewriteResource;
@@ -41,7 +44,8 @@ class Rewrites implements ComponentInterface
         private readonly UrlPersistInterface $urlPersist,
         private readonly UrlRewriteFactory $urlRewriteFactory,
         private readonly UrlRewriteResource $urlRewriteResource,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -76,7 +80,7 @@ class Rewrites implements ComponentInterface
                     continue;
                 }
 
-                $this->createOrUpdateRewriteRule($rewriteArray, $context->isDryRun(), $result);
+                $this->createOrUpdateRewriteRule($rewriteArray, $context->getMode(), $context->isDryRun(), $result);
             } catch (ComponentException $e) {
                 $this->log->logError($e->getMessage());
                 $result->addError($e->getMessage());
@@ -132,8 +136,12 @@ class Rewrites implements ComponentInterface
      *
      * @param array $rewriteArray
      */
-    public function createOrUpdateRewriteRule(array $rewriteArray, bool $dryRun, ComponentResult $result): void
-    {
+    public function createOrUpdateRewriteRule(
+        array $rewriteArray,
+        ComponentMode $mode,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
         $rewrite = $this->urlRewriteFactory->create();
         $successMessage = 'URL Rewrite: "%s" created';
         $isUpdate = false;
@@ -141,6 +149,21 @@ class Rewrites implements ComponentInterface
             ->addFieldToFilter(self::REQUEST_PATH_KEY, $rewriteArray[self::REQUEST_PATH_CSV_KEY])
             ->addFieldToFilter('store_id', $rewriteArray[self::STORE_ID_CSV_KEY])
             ->getSize();
+
+        $request = new ReconciliationRequest(
+            self::ALIAS,
+            $rewriteArray[self::REQUEST_PATH_CSV_KEY] . '_' . $rewriteArray[self::STORE_ID_CSV_KEY],
+            $mode,
+            $rewriteCount > 0
+        );
+
+        if ($this->gate->decide($request)->isSkip()) {
+            $this->log->logComment(
+                sprintf('URL Rewrite "%s" exists, skipped (create mode)', $rewriteArray[self::REQUEST_PATH_CSV_KEY])
+            );
+            $result->recordSkipped();
+            return;
+        }
 
         if ($rewriteCount > 0) {
             $rewrite = $rewrite->getCollection()

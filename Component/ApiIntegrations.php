@@ -11,15 +11,19 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magento\Integration\Model\IntegrationFactory;
 use Magento\Integration\Model\Oauth\TokenFactory;
 use Magento\Integration\Model\ResourceModel\Oauth\Token as TokenResource;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\ReconciliationOutcome;
 use Magento\Integration\Model\AuthorizationService;
 use Magento\Integration\Api\IntegrationServiceInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
@@ -35,7 +39,8 @@ class ApiIntegrations implements ComponentInterface
         private readonly AuthorizationService $authorizationService,
         private readonly TokenFactory $tokenFactory,
         private readonly TokenResource $tokenResource,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -56,7 +61,7 @@ class ApiIntegrations implements ComponentInterface
                     continue;
                 }
 
-                $this->createApiIntegration($integrationData, $context->isDryRun(), $result);
+                $this->createApiIntegration($integrationData, $context->getMode(), $context->isDryRun(), $result);
             } catch (ComponentException $e) {
                 $this->log->logError($e->getMessage());
                 $result->addError($e->getMessage());
@@ -66,50 +71,64 @@ class ApiIntegrations implements ComponentInterface
         return $result;
     }
 
-    private function createApiIntegration(array $integrationData, bool $dryRun, ComponentResult $result): void
-    {
+    private function createApiIntegration(
+        array $integrationData,
+        ComponentMode $mode,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
         $integration = $this->integrationFactory->create();
-        $integrationCount = $integration->getCollection()
+        $existing = $integration->getCollection()
             ->addFieldToFilter('name', $integrationData['name'])
-            ->getSize();
+            ->getFirstItem();
+        $exists = (bool) $existing->getId();
 
-        if ($integrationCount > 0) {
-            $integration = $integration
-                ->getCollection()
-                ->addFieldToFilter('name', $integrationData['name'])
-                ->getFirstItem();
+        $version = $integrationData['version'] ?? null;
+        $request = new ReconciliationRequest(
+            self::ALIAS,
+            (string) $integrationData['name'],
+            $mode,
+            $exists,
+            $version ? (int) $version : null
+        );
 
+        $outcome = $this->gate->decide($request);
+        if ($outcome->isSkip()) {
             $this->log->logComment(
-                sprintf('API Integration "%s" already exists: Creation skipped', $integration->getName())
+                sprintf('API Integration "%s" exists, skipped (create mode)', $integrationData['name'])
             );
             $result->recordSkipped();
-
             return;
         }
 
         if ($dryRun) {
             $this->log->logInfo(
-                sprintf('[dry-run] Would create API Integration "%s"', $integrationData['name'])
+                sprintf('[dry-run] Would %s API Integration "%s"', $outcome->value, $integrationData['name'])
             );
-            $result->recordCreated();
+            $outcome->record($result);
             return;
         }
 
         $integrationDataArray = $this->convertToUseableData($integrationData);
-        $integration = $this->integrationService->create($integrationDataArray);
-        $integrationId = $integration->getId();
 
-        $this->log->logInfo(
-            sprintf('API Integration "%s" created', $integrationData['name'])
-        );
-        $result->recordCreated();
+        if ($outcome === ReconciliationOutcome::Create) {
+            $integration = $this->integrationService->create($integrationDataArray);
+            $integrationId = $integration->getId();
+            $this->setPermissions($integrationId, $integrationData['resources']);
+            // Token is minted only on creation.
+            $this->activateAndAuthorize($integration->getConsumerId());
+            $this->log->logInfo(sprintf('API Integration "%s" created', $integrationData['name']));
+        } else {
+            // Maintain: update metadata + re-grant permissions, but NEVER re-mint the
+            // access token — doing so would break any live consumer using it.
+            $integrationDataArray['integration_id'] = $existing->getId();
+            $integration = $this->integrationService->update($integrationDataArray);
+            $this->setPermissions($integration->getId(), $integrationData['resources']);
+            $this->log->logInfo(sprintf('API Integration "%s" updated (token preserved)', $integrationData['name']));
+        }
 
-        $this->setPermissions($integrationId, $integrationData['resources']);
-        $this->activateAndAuthorize($integration->getConsumerId());
-
-        $this->log->logInfo(
-            sprintf('API Integration "%s" permissions and authorisation set.', $integrationData['name'])
-        );
+        $this->gate->commitVersion($request, $dryRun);
+        $outcome->record($result);
     }
 
     /**

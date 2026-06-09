@@ -11,10 +11,14 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\ReconciliationOutcome;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Sales\Model\Order\Status;
 use Magento\Sales\Model\Order\StatusFactory;
 use Magento\Sales\Model\ResourceModel\Order\Status as StatusResource;
@@ -32,7 +36,8 @@ class OrderStatuses implements ComponentInterface
     public function __construct(
         private readonly StatusFactory $statusFactory,
         private readonly StatusResourceFactory $statusResourceFactory,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -48,7 +53,7 @@ class OrderStatuses implements ComponentInterface
 
         foreach ($data['order_statuses'] as $statusSet) {
             try {
-                $this->createOrderStatuses($statusSet, $context->isDryRun(), $result);
+                $this->createOrderStatuses($statusSet, $context->getMode(), $context->isDryRun(), $result);
             } catch (ComponentException $e) {
                 $this->log->logError($e->getMessage());
                 $result->addError($e->getMessage());
@@ -62,38 +67,61 @@ class OrderStatuses implements ComponentInterface
      * @param array $statusSet
      * @throws \Magento\Framework\Exception\AlreadyExistsException
      */
-    public function createOrderStatuses(array $statusSet, bool $dryRun, ComponentResult $result): void
-    {
+    public function createOrderStatuses(
+        array $statusSet,
+        ComponentMode $mode,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
         foreach ($statusSet['statuses'] as $statusData) {
-            if ($dryRun) {
-                $this->log->logInfo(
-                    sprintf('[dry-run] Would create order status %s', $statusData['name'])
-                );
-                $result->recordCreated();
-                continue;
-            }
+            $code = $statusData['code'];
 
             /** @var StatusResource $statusResource */
             $statusResource = $this->statusResourceFactory->create();
             /** @var Status $status */
             $status = $this->statusFactory->create();
-            $status->setData([
-                'status' => $statusData['code'],
-                'label' => $statusData['name'],
-            ]);
+            $statusResource->load($status, $code);
+            $exists = (bool) $status->getStatus();
+
+            $version = $statusData['version'] ?? null;
+            $request = new ReconciliationRequest(
+                self::ALIAS,
+                (string) $code,
+                $mode,
+                $exists,
+                $version ? (int) $version : null
+            );
+
+            $outcome = $this->gate->decide($request);
+            if ($outcome->isSkip()) {
+                $this->log->logComment(sprintf('Order status %s exists, skipped (create mode)', $statusData['name']));
+                $result->recordSkipped();
+                continue;
+            }
+
+            if ($dryRun) {
+                $this->log->logInfo(
+                    sprintf('[dry-run] Would %s order status %s', $outcome->value, $statusData['name'])
+                );
+                $outcome->record($result);
+                continue;
+            }
+
+            $status->setData('status', $code);
+            $status->setData('label', $statusData['name']);
 
             try {
                 $statusResource->save($status);
-            } catch (ComponentException $e) {
+                $status->assignState($statusSet['state'], false, true);
+            } catch (\Exception $e) {
                 $this->log->logError($e->getMessage());
             }
 
-            $status->assignState($statusSet['state'], false, true);
-
+            $this->gate->commitVersion($request, $dryRun);
             $this->log->logInfo(
-                sprintf('Order status %s created', $statusData['name'])
+                sprintf('Order status %s %s', $statusData['name'], $outcome->value)
             );
-            $result->recordCreated();
+            $outcome->record($result);
         }
     }
 

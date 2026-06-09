@@ -11,6 +11,7 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
@@ -18,6 +19,7 @@ use Magebit\Configurator\Model\ComponentResult;
 use FireGento\FastSimpleImport\Model\ImporterFactory;
 use Magento\Customer\Api\GroupManagementInterface;
 use Magento\Customer\Api\GroupRepositoryInterface;
+use Magento\Customer\Model\ResourceModel\Customer\CollectionFactory as CustomerCollectionFactory;
 use Magento\Framework\Api\SearchCriteriaBuilder;
 use Magento\ImportExport\Model\Import;
 use Magento\Indexer\Model\IndexerFactory;
@@ -51,7 +53,8 @@ class Customers implements ComponentInterface
         protected readonly GroupManagementInterface $groupManagement,
         protected readonly SearchCriteriaBuilder $criteriaBuilder,
         protected readonly IndexerFactory $indexerFactory,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly CustomerCollectionFactory $customerCollectionFactory
     ) {
     }
 
@@ -121,7 +124,23 @@ class Customers implements ComponentInterface
             $rowIndex++;
         }
 
+        // Row-level reconciliation: in create mode drop whole customer groups
+        // (an email-bearing row plus its trailing address rows) whose email
+        // already exists. A version bump forces a full re-import; maintain
+        // re-imports (APPEND upserts). Matching is case-insensitive.
+        if ($context->getMode() === ComponentMode::Create
+            && $context->getVersion() === null
+            && $customerImport !== []
+        ) {
+            $customerImport = $this->dropExistingCustomers($customerImport, $result);
+        }
+
         $importCount = count($customerImport);
+
+        if ($importCount === 0) {
+            $this->log->logInfo('No new customers to import (all already exist in create mode).');
+            return $result;
+        }
 
         if ($context->isDryRun()) {
             $this->log->logInfo(
@@ -210,6 +229,82 @@ class Customers implements ComponentInterface
         }
 
         return $this->groupDefault;
+    }
+
+    /**
+     * Drop rows belonging to customers whose email already exists. Rows with an
+     * empty email are additional addresses for the preceding customer and follow
+     * that customer's keep/drop decision.
+     *
+     * @param array $customerImport
+     * @param ComponentResult $result
+     * @return array
+     */
+    private function dropExistingCustomers(array $customerImport, ComponentResult $result): array
+    {
+        $emails = [];
+        foreach ($customerImport as $row) {
+            $email = (string) ($row[self::CUSTOMER_EMAIL_HEADER] ?? '');
+            if ($email !== '') {
+                $emails[] = $email;
+            }
+        }
+
+        $existing = $this->loadExistingCustomerEmails($emails);
+        if ($existing === []) {
+            return $customerImport;
+        }
+
+        $kept = [];
+        $dropCurrent = false;
+        $dropped = 0;
+        foreach ($customerImport as $row) {
+            $email = (string) ($row[self::CUSTOMER_EMAIL_HEADER] ?? '');
+            if ($email !== '') {
+                // A new customer starts here; decide whether to keep the group.
+                $dropCurrent = isset($existing[strtolower($email)]);
+                if ($dropCurrent) {
+                    $result->recordSkipped();
+                }
+            }
+
+            if ($dropCurrent) {
+                $dropped++;
+                continue;
+            }
+
+            $kept[] = $row;
+        }
+
+        if ($dropped > 0) {
+            $this->log->logInfo(sprintf('Create mode: %d existing customer row(s) skipped.', $dropped));
+        }
+
+        return $kept;
+    }
+
+    /**
+     * Load the subset of given emails that already exist, as a lowercased set.
+     *
+     * @param string[] $emails
+     * @return array<string, true>
+     */
+    private function loadExistingCustomerEmails(array $emails): array
+    {
+        $emails = array_values(array_unique(array_filter($emails, static fn (string $e): bool => $e !== '')));
+        if ($emails === []) {
+            return [];
+        }
+
+        $collection = $this->customerCollectionFactory->create();
+        $collection->addFieldToFilter(self::CUSTOMER_EMAIL_HEADER, ['in' => $emails]);
+
+        $existing = [];
+        foreach ($collection as $customer) {
+            $existing[strtolower((string) $customer->getEmail())] = true;
+        }
+
+        return $existing;
     }
 
     private function reindex(): void

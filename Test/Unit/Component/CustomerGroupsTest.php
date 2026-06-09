@@ -12,9 +12,11 @@ namespace Magebit\Configurator\Test\Unit\Component;
 
 use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\VersionManagementInterface;
 use Magebit\Configurator\Component\CustomerGroups;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magento\Customer\Api\Data\GroupInterface;
 use Magento\Customer\Api\Data\GroupInterfaceFactory;
 use Magento\Customer\Api\GroupRepositoryInterface;
@@ -51,19 +53,25 @@ class CustomerGroupsTest extends TestCase
         $this->searchCriteriaBuilder->method('addFilter')->willReturnSelf();
         $this->searchCriteriaBuilder->method('create')->willReturn($this->createMock(SearchCriteria::class));
 
+        // Real gate over a version store that always reports "not newer".
+        $versionManagement = $this->createMock(VersionManagementInterface::class);
+        $versionManagement->method('isNewVersion')->willReturn(false);
+        $gate = new ReconciliationGate($versionManagement, $this->log);
+
         $this->component = new CustomerGroups(
             $this->groupRepository,
             $this->groupFactory,
             $this->taxClassRepository,
             $this->searchCriteriaBuilder,
-            $this->log
+            $this->log,
+            $gate
         );
     }
 
     public function testCreatesGroupWhenItDoesNotExist(): void
     {
         $this->givenTaxClassExists(3);
-        $this->givenGroupCount(0);
+        $this->givenNoExistingGroup();
 
         $group = $this->createMock(GroupInterface::class);
         $group->expects($this->once())->method('setCode')->with('VIP')->willReturnSelf();
@@ -80,10 +88,11 @@ class CustomerGroupsTest extends TestCase
         $this->assertSame(1, $result->getCreated());
     }
 
-    public function testSkipsExistingGroup(): void
+    public function testCreateModeProtectsExistingGroup(): void
     {
         $this->givenTaxClassExists(3);
-        $this->givenGroupCount(1);
+        // Existing group with a DIFFERENT tax class — create mode must still skip it.
+        $this->givenExistingGroup(99);
 
         $this->groupFactory->expects($this->never())->method('create');
         $this->groupRepository->expects($this->never())->method('save');
@@ -92,15 +101,48 @@ class CustomerGroupsTest extends TestCase
             ['taxclass' => 'Retail Customer', 'groups' => [['name' => 'VIP']]],
         ]);
 
-        $this->assertTrue($result->isSuccessful());
         $this->assertSame(0, $result->getCreated());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testMaintainModeUpdatesExistingTaxClass(): void
+    {
+        $this->givenTaxClassExists(3);
+        $existing = $this->givenExistingGroup(99);
+
+        // Maintain mode re-points the existing group's tax class to the configured one.
+        $existing->expects($this->once())->method('setTaxClassId')->with(3)->willReturnSelf();
+        $existing->method('setCode')->willReturnSelf();
+        $this->groupFactory->expects($this->never())->method('create');
+        $this->groupRepository->expects($this->once())->method('save')->with($existing);
+
+        $result = $this->execute([
+            ['taxclass' => 'Retail Customer', 'groups' => [['name' => 'VIP']]],
+        ], false, null, ComponentMode::Maintain);
+
+        $this->assertSame(0, $result->getCreated());
+        $this->assertSame(1, $result->getUpdated());
+    }
+
+    public function testMaintainModeSkipsUnchangedGroup(): void
+    {
+        $this->givenTaxClassExists(3);
+        // Existing group already on the configured tax class -> unchanged -> skip.
+        $this->givenExistingGroup(3);
+
+        $this->groupRepository->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            ['taxclass' => 'Retail Customer', 'groups' => [['name' => 'VIP']]],
+        ], false, null, ComponentMode::Maintain);
+
         $this->assertSame(1, $result->getSkipped());
     }
 
     public function testDryRunDoesNotPersist(): void
     {
         $this->givenTaxClassExists(3);
-        $this->givenGroupCount(0);
+        $this->givenNoExistingGroup();
         $this->groupFactory->method('create')->willReturn($this->createMock(GroupInterface::class));
 
         $this->groupRepository->expects($this->never())->method('save');
@@ -129,7 +171,7 @@ class CustomerGroupsTest extends TestCase
     public function testRejectsMissingAndOverlongNames(): void
     {
         $this->givenTaxClassExists(3);
-        $this->givenGroupCount(0);
+        $this->givenNoExistingGroup();
         $this->groupFactory->method('create')->willReturn($this->createMock(GroupInterface::class));
 
         // Missing name + 33-char name are both rejected; the valid one is still saved.
@@ -160,10 +202,14 @@ class CustomerGroupsTest extends TestCase
      * @param array $customerGroups value of the `customergroups` node
      * @param array|null $rawData full source override (bypasses $customerGroups)
      */
-    private function execute(array $customerGroups, bool $dryRun = false, ?array $rawData = null): ComponentResult
-    {
+    private function execute(
+        array $customerGroups,
+        bool $dryRun = false,
+        ?array $rawData = null,
+        ComponentMode $mode = ComponentMode::Create
+    ): ComponentResult {
         $data = $rawData ?? ['customergroups' => $customerGroups];
-        $context = new ComponentContext('test.yaml', ComponentMode::Create, 'test', $dryRun, static fn (): array => $data);
+        $context = new ComponentContext('test.yaml', $mode, 'test', $dryRun, static fn (): array => $data);
 
         return $this->component->execute($context);
     }
@@ -185,10 +231,22 @@ class CustomerGroupsTest extends TestCase
         $this->taxClassRepository->method('getList')->willReturn($results);
     }
 
-    private function givenGroupCount(int $count): void
+    private function givenNoExistingGroup(): void
     {
         $results = $this->createMock(GroupSearchResultsInterface::class);
-        $results->method('getTotalCount')->willReturn($count);
+        $results->method('getItems')->willReturn([]);
         $this->groupRepository->method('getList')->willReturn($results);
+    }
+
+    private function givenExistingGroup(int $taxClassId): GroupInterface&MockObject
+    {
+        $group = $this->createMock(GroupInterface::class);
+        $group->method('getTaxClassId')->willReturn($taxClassId);
+
+        $results = $this->createMock(GroupSearchResultsInterface::class);
+        $results->method('getItems')->willReturn([$group]);
+        $this->groupRepository->method('getList')->willReturn($results);
+
+        return $group;
     }
 }

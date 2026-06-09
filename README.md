@@ -56,6 +56,48 @@ bin/magento configurator:run --env="local" -i                   # ignore missing
 bin/magento configurator:run --env="local" -v                   # verbose logging
 ```
 
+## Reconciliation: modes & versioning
+
+Every component now applies the **same** rule for how config reconciles against
+existing data, via a shared `ReconciliationGate`:
+
+| state | `create` mode | `maintain` mode |
+|-------|---------------|-----------------|
+| entity does not exist | create | create |
+| exists, matches config | skip | skip |
+| exists, differs, version bumped | update | update |
+| exists, differs, no version bump | **skip** (protected) | update |
+
+Set the mode per environment in `master.yaml`:
+
+```yaml
+config:
+  enabled: 1
+  sources: [ ../configurator/Config/config.yaml ]
+  env:
+    production: { mode: create }    # safe: only new entities + version bumps
+    staging:    { mode: maintain }  # reconcile drift
+```
+
+When no `mode` is set the default is **`create`**.
+
+**Versioning** forces an update even in create mode:
+- **Per-entity** — add `version: <n>` to an entity in its source file (supported
+  where the data shape has per-entity nodes: config values, blocks, pages,
+  widgets, attributes, …). Bump it to push that one change to production.
+- **Per-component** — add `version: <n>` at the component level in `master.yaml`
+  to run the *whole* component once per version (ideal for `sql`, `sequence`,
+  `media`, and bulk importers like `tiered_prices` / `shippingtablerates`).
+
+> **⚠ Upgrade behavior change (v2 reconciliation):** components that previously
+> overwrote existing entities on every run (widgets, attributes, websites,
+> rewrites, product links, catalog price rules, admin roles, review ratings, …)
+> now honor mode uniformly. In `create` mode they **protect existing entities**.
+> If you relied on always-overwrite, set `mode: maintain` for those components.
+> Bulk importers (`products`, `customers`, `taxrates`) skip rows whose key
+> already exists in create mode; they do not diff individual attributes, so
+> `maintain` re-imports every row.
+
 ## Configuration reference
 
 See [`docs/schema/`](docs/schema/README.md) for the source format of every
@@ -77,7 +119,8 @@ public contract for the v2 line.
 ## Components
 
 All components are implemented and execute-verified on Magento 2.4.7. Each links
-to its schema page.
+to its schema page. **Every component honors `create`/`maintain` mode and the
+versioning levers** described above — the notes below only call out extras.
 
 | Component | Alias | Notes |
 |-----------|-------|-------|
@@ -87,7 +130,7 @@ to its schema page.
 | Attributes | `attributes` | create/maintain, swatches |
 | Attribute Sets | `attribute_sets` | |
 | Categories | `categories` | create/maintain |
-| Products | `products` | FastSimpleImport (configurable products need their simple products to exist) |
+| Products | `products` | FastSimpleImport; create mode skips existing SKUs (configurable products need their simple products to exist) |
 | Blocks | `blocks` | create/maintain, phtml templates, versioning |
 | Pages | `pages` | create/maintain, versioning |
 | API Integrations | `apiintegrations` | |
@@ -101,10 +144,10 @@ to its schema page.
 | Review Ratings | `review_rating` | |
 | Product Links | `product_links` | related / up-sell / cross-sell |
 | Customer Attributes | `customer_attributes` | |
-| Customers | `customers` | FastSimpleImport |
+| Customers | `customers` | FastSimpleImport; create mode skips existing emails |
 | SQL | `sql` | raw SQL files |
 | Catalog Price Rules | `catalog_price_rules` | |
-| Shipping Table Rates | `shippingtablerates` | |
+| Shipping Table Rates | `shippingtablerates` | gate via component-level `version:` (no per-row reconcile) |
 | Order Statuses | `order_statuses` | |
 | Tiered Prices | `tiered_prices` | FastSimpleImport |
 

@@ -11,10 +11,14 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Api\ReconciliationOutcome;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
+use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\Eav\Api\AttributeSetRepositoryInterface;
 use Magento\Catalog\Model\Product;
 use Magento\Eav\Api\Data\AttributeSetInterface;
@@ -31,7 +35,8 @@ class AttributeSets implements ComponentInterface
     public function __construct(
         private readonly EavSetup $eavSetup,
         private readonly AttributeSetRepositoryInterface $attributeSetRepository,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly ReconciliationGate $gate
     ) {
     }
 
@@ -49,7 +54,12 @@ class AttributeSets implements ComponentInterface
 
         try {
             foreach ($attributeConfigurationData['attribute_sets'] as $attributeSetConfiguration) {
-                $this->processAttributeSet($attributeSetConfiguration, $context->isDryRun(), $result);
+                $this->processAttributeSet(
+                    $attributeSetConfiguration,
+                    $context->getMode(),
+                    $context->isDryRun(),
+                    $result
+                );
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -59,31 +69,66 @@ class AttributeSets implements ComponentInterface
         return $result;
     }
 
-    protected function processAttributeSet(array $attributeSetConfig, bool $dryRun, ComponentResult $result): void
-    {
-        if ($dryRun) {
-            $this->log->logInfo(
-                sprintf('[dry-run] Would create attribute set: "%s"', $attributeSetConfig['name'])
-            );
-            $result->recordCreated();
+    protected function processAttributeSet(
+        array $attributeSetConfig,
+        ComponentMode $mode,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
+        $name = $attributeSetConfig['name'];
+        // getAttributeSetId() throws when the set is missing, so probe with getAttributeSet().
+        $attributeSetData = $this->eavSetup->getAttributeSet(Product::ENTITY, $name);
+        $existingId = is_array($attributeSetData) ? ($attributeSetData['attribute_set_id'] ?? null) : null;
+        $exists = !empty($existingId);
+
+        $version = $attributeSetConfig['version'] ?? null;
+        $request = new ReconciliationRequest(
+            self::ALIAS,
+            (string) $name,
+            $mode,
+            $exists,
+            $version ? (int) $version : null
+        );
+
+        $outcome = $this->gate->decide($request);
+        if ($outcome->isSkip()) {
+            $this->log->logComment(sprintf('Attribute set "%s" exists, skipped (create mode)', $name));
+            $result->recordSkipped();
             return;
         }
 
-        $this->eavSetup->addAttributeSet(Product::ENTITY, $attributeSetConfig['name']);
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would %s attribute set: "%s"', $outcome->value, $name));
+            $outcome->record($result);
+            return;
+        }
 
-        $this->log->logInfo(sprintf('Creating attribute set: "%s"', $attributeSetConfig['name']));
-        $result->recordCreated();
+        $isCreate = $outcome === ReconciliationOutcome::Create;
 
-        $attributeSetId = $this->eavSetup->getAttributeSetId(Product::ENTITY, $attributeSetConfig['name']);
-        $attributeSetEntity = $this->attributeSetRepository->get($attributeSetId);
-        if (array_key_exists('inherit', $attributeSetConfig)) {
+        if ($isCreate) {
+            $this->eavSetup->addAttributeSet(Product::ENTITY, $name);
+            $this->log->logInfo(sprintf('Creating attribute set: "%s"', $name));
+            $existingId = $this->eavSetup->getAttributeSetId(Product::ENTITY, $name);
+        } else {
+            $this->log->logInfo(sprintf('Reconciling attribute set: "%s"', $name));
+        }
+
+        $attributeSetEntity = $this->attributeSetRepository->get($existingId);
+
+        // initFromSkeleton resets the set from a template; only safe on creation,
+        // re-running it on an existing set would wipe its current groups/attributes.
+        if ($isCreate && array_key_exists('inherit', $attributeSetConfig)) {
             $attributeSetEntity->initFromSkeleton($this->getAttributeSetId($attributeSetConfig['inherit']));
             $this->attributeSetRepository->save($attributeSetEntity);
         }
 
+        // Group association is idempotent (it checks existence), so it runs in both modes.
         if (array_key_exists('groups', $attributeSetConfig) && count($attributeSetConfig['groups']) > 0) {
             $this->addAttributeGroups($attributeSetEntity, $attributeSetConfig['groups']);
         }
+
+        $this->gate->commitVersion($request, $dryRun);
+        $outcome->record($result);
     }
 
     protected function addAttributeGroups(AttributeSetInterface $attributeSetEntity, array $attributeGroupData): void
