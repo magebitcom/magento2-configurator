@@ -17,8 +17,8 @@ use Magebit\Configurator\Component\CatalogPriceRules\CatalogPriceRulesProcessor;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
 use Magebit\Configurator\Model\Export\ExportContext;
-use Magento\CatalogRule\Api\Data\RuleInterfaceFactory;
 use Magento\CatalogRule\Model\Rule;
+use Magento\CatalogRule\Model\RuleFactory;
 
 /**
  * Manages Catalog Price Rules by delegating to the CatalogPriceRulesProcessor.
@@ -50,7 +50,7 @@ class CatalogPriceRules implements ComponentInterface, ExportableComponentInterf
     public function __construct(
         private readonly CatalogPriceRulesProcessor $processor,
         private readonly LoggerInterface $log,
-        private readonly RuleInterfaceFactory $ruleFactory
+        private readonly RuleFactory $ruleFactory
     ) {
     }
 
