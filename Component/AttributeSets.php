@@ -76,7 +76,9 @@ class AttributeSets implements ComponentInterface
         ComponentResult $result
     ): void {
         $name = $attributeSetConfig['name'];
-        $existingId = $this->eavSetup->getAttributeSetId(Product::ENTITY, $name);
+        // getAttributeSetId() throws when the set is missing, so probe with getAttributeSet().
+        $attributeSetData = $this->eavSetup->getAttributeSet(Product::ENTITY, $name);
+        $existingId = is_array($attributeSetData) ? ($attributeSetData['attribute_set_id'] ?? null) : null;
         $exists = !empty($existingId);
 
         $version = $attributeSetConfig['version'] ?? null;
