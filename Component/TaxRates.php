@@ -11,10 +11,12 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magento\Tax\Model\Calculation\RateFactory;
 use Magento\TaxImportExport\Model\Rate\CsvImportHandler;
 
 class TaxRates implements ComponentInterface
@@ -24,7 +26,8 @@ class TaxRates implements ComponentInterface
 
     public function __construct(
         private readonly CsvImportHandler $csvImportHandler,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly RateFactory $rateFactory
     ) {
     }
 
@@ -41,6 +44,19 @@ class TaxRates implements ComponentInterface
         try {
             // Sort data into the column order importExport requires
             $sortedData = $this->getSortedData($data);
+
+            // Row-level reconciliation: in create mode drop rows whose rate code
+            // already exists (a version bump forces a full re-import; maintain
+            // re-imports). Done before the dry-run branch so counts are accurate.
+            if ($context->getMode() === ComponentMode::Create && $context->getVersion() === null) {
+                $sortedData = $this->dropExistingRates($sortedData, $result);
+            }
+
+            // Only the header row remains -> nothing new to import.
+            if (count($sortedData) <= 1) {
+                $this->log->logInfo('No new tax rates to import (all already exist in create mode).');
+                return $result;
+            }
 
             if ($context->isDryRun()) {
                 // Bulk CSV import: skip both the temp-file write and the import.
@@ -101,6 +117,71 @@ class TaxRates implements ComponentInterface
             $sortedData[] = $rateData;
         }
         return $sortedData;
+    }
+
+    /**
+     * Drop sorted-data rows whose tax rate code already exists. The first column
+     * of each data row is the code; the header row (index 0) is always kept.
+     *
+     * @param array $sortedData
+     * @param ComponentResult $result
+     * @return array
+     */
+    protected function dropExistingRates(array $sortedData, ComponentResult $result): array
+    {
+        if (count($sortedData) <= 1) {
+            return $sortedData;
+        }
+
+        $header = $sortedData[0];
+        $rows = array_slice($sortedData, 1);
+
+        $codes = array_map(static fn (array $row): string => (string) ($row[0] ?? ''), $rows);
+        $existing = $this->loadExistingRateCodes($codes);
+        if ($existing === []) {
+            return $sortedData;
+        }
+
+        $kept = [$header];
+        $dropped = 0;
+        foreach ($rows as $row) {
+            $code = strtolower((string) ($row[0] ?? ''));
+            if ($code !== '' && isset($existing[$code])) {
+                $result->recordSkipped();
+                $dropped++;
+                continue;
+            }
+            $kept[] = $row;
+        }
+
+        if ($dropped > 0) {
+            $this->log->logInfo(sprintf('Create mode: %d existing tax rate(s) skipped.', $dropped));
+        }
+
+        return $kept;
+    }
+
+    /**
+     * Load the subset of given rate codes that already exist, lowercased.
+     *
+     * @param string[] $codes
+     * @return array<string, true>
+     */
+    private function loadExistingRateCodes(array $codes): array
+    {
+        $codes = array_values(array_unique(array_filter($codes, static fn (string $c): bool => $c !== '')));
+        if ($codes === []) {
+            return [];
+        }
+
+        $collection = $this->rateFactory->create()->getCollection()->addFieldToFilter('code', ['in' => $codes]);
+
+        $existing = [];
+        foreach ($collection as $rate) {
+            $existing[strtolower((string) $rate->getCode())] = true;
+        }
+
+        return $existing;
     }
 
     /**

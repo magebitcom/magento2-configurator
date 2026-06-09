@@ -11,7 +11,9 @@ declare(strict_types=1);
 namespace Magebit\Configurator\Component;
 
 use Magebit\Configurator\Api\ComponentInterface;
+use Magebit\Configurator\Api\ComponentMode;
 use Magento\Catalog\Model\ProductFactory;
+use Magento\Catalog\Model\ResourceModel\Product\CollectionFactory as ProductCollectionFactory;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Component\Product\Image;
 use Magebit\Configurator\Component\Product\AttributeOption;
@@ -82,7 +84,8 @@ class Products implements ComponentInterface
         private readonly Image $image,
         private readonly ValidatorFactory $validatorFactory,
         private readonly AttributeOption $attributeOption,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly ProductCollectionFactory $productCollectionFactory
     ) {
     }
 
@@ -147,6 +150,37 @@ class Products implements ComponentInterface
                 )
             );
         }
+
+        // Row-level reconciliation: in create mode, drop rows whose SKU already
+        // exists so we don't re-import existing products. A component-level
+        // version bump (the Processor already let us run past its source gate)
+        // forces a full re-import. Maintain always re-imports (FastSimpleImport
+        // is opaque, so we cannot cheaply diff individual attributes).
+        if ($context->getMode() === ComponentMode::Create
+            && $context->getVersion() === null
+            && $productsArray !== []
+        ) {
+            $existing = $this->loadExistingSkus($this->successProducts);
+            if ($existing !== []) {
+                $kept = [];
+                foreach ($productsArray as $row) {
+                    $sku = strtolower((string) ($row[self::SKU_COLUMN_HEADING] ?? ''));
+                    if ($sku !== '' && isset($existing[$sku])) {
+                        $result->recordSkipped();
+                        continue;
+                    }
+                    $kept[] = $row;
+                }
+                if (count($kept) !== count($productsArray)) {
+                    $this->log->logInfo(sprintf(
+                        'Create mode: %d existing product row(s) skipped.',
+                        count($productsArray) - count($kept)
+                    ));
+                }
+                $productsArray = $kept;
+            }
+        }
+
         if ($productsArray === []) {
             // Nothing survived preparation (e.g. configurable products whose
             // associated simple products don't exist yet). FastSimpleImport's
@@ -191,6 +225,32 @@ class Products implements ComponentInterface
         $this->log->logError($import->getErrorMessages());
 
         return $result;
+    }
+
+    /**
+     * Load the subset of the given SKUs that already exist, as a lowercased
+     * lookup set, in a single query. SKU matching is case-insensitive.
+     *
+     * @param string[] $skus
+     * @return array<string, true>
+     */
+    private function loadExistingSkus(array $skus): array
+    {
+        $skus = array_values(array_filter(array_map('strval', $skus), static fn (string $s): bool => $s !== ''));
+        if ($skus === []) {
+            return [];
+        }
+
+        $collection = $this->productCollectionFactory->create();
+        $collection->addAttributeToSelect(self::SKU_COLUMN_HEADING);
+        $collection->addFieldToFilter(self::SKU_COLUMN_HEADING, ['in' => $skus]);
+
+        $existing = [];
+        foreach ($collection as $product) {
+            $existing[strtolower((string) $product->getSku())] = true;
+        }
+
+        return $existing;
     }
 
     /**
