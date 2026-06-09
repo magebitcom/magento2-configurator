@@ -23,6 +23,9 @@ use Magebit\Configurator\Component\Product\ValidatorFactory;
 use Magebit\Configurator\Component\Product\Validator;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magento\InventoryApi\Api\Data\SourceItemInterface;
+use Magento\InventoryApi\Api\Data\SourceItemInterfaceFactory;
+use Magento\InventoryApi\Api\SourceItemsSaveInterface;
 
 /**
  * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
@@ -34,6 +37,8 @@ class Products implements ComponentInterface
     public const SKU_COLUMN_HEADING = 'sku';
     public const QTY_COLUMN_HEADING = 'qty';
     public const IS_IN_STOCK_COLUMN_HEADING = 'is_in_stock';
+    /** Optional CSV column: "source_code=qty[:status];other=qty" (status 1=in stock default). */
+    public const MSI_SOURCES_COLUMN = 'msi_sources';
     public const SEPARATOR = ';';
 
     private const ALIAS = 'products';
@@ -75,6 +80,9 @@ class Products implements ComponentInterface
     /** @var array */
     private array $skippedProducts = [];
 
+    /** @var array<string, string> sku => raw msi_sources spec */
+    private array $msiSourceItems = [];
+
     /** @var int|false */
     private $skuColumn;
 
@@ -85,7 +93,9 @@ class Products implements ComponentInterface
         private readonly ValidatorFactory $validatorFactory,
         private readonly AttributeOption $attributeOption,
         private readonly LoggerInterface $log,
-        private readonly ProductCollectionFactory $productCollectionFactory
+        private readonly ProductCollectionFactory $productCollectionFactory,
+        private readonly SourceItemInterfaceFactory $sourceItemFactory,
+        private readonly SourceItemsSaveInterface $sourceItemsSave
     ) {
     }
 
@@ -138,6 +148,16 @@ class Products implements ComponentInterface
             }
             if ($this->isStockSpecified($productArray) === false) {
                 $productArray = $this->setStock($productArray);
+            }
+            // Capture MSI source items (if any) and strip the column so
+            // FastSimpleImport doesn't choke on the unknown attribute.
+            if (isset($productArray[self::MSI_SOURCES_COLUMN])) {
+                $msiSku = (string) ($productArray[self::SKU_COLUMN_HEADING] ?? '');
+                if ($msiSku !== '' && (string) $productArray[self::MSI_SOURCES_COLUMN] !== '') {
+                    // Keyed by the SKU's original case so source_item.sku matches the product.
+                    $this->msiSourceItems[$msiSku] = (string) $productArray[self::MSI_SOURCES_COLUMN];
+                }
+                unset($productArray[self::MSI_SOURCES_COLUMN]);
             }
             $productsArray[] = $productArray;
             $this->successProducts[] = $product[$this->skuColumn];
@@ -206,6 +226,11 @@ class Products implements ComponentInterface
             $this->log->logInfo(
                 sprintf('[dry-run] Would import %s product rows via FastSimpleImport.', count($validatedProducts))
             );
+            if ($this->msiSourceItems !== []) {
+                $this->log->logInfo(
+                    sprintf('[dry-run] Would apply MSI source items for %d SKU(s).', count($this->msiSourceItems))
+                );
+            }
             return $result;
         }
 
@@ -224,7 +249,64 @@ class Products implements ComponentInterface
         $this->log->logInfo($import->getLogTrace());
         $this->log->logError($import->getErrorMessages());
 
+        // Apply MSI source items for the SKUs that were actually imported.
+        if ($this->msiSourceItems !== []) {
+            $importedSkus = [];
+            foreach ($validatedProducts as $row) {
+                $importedSkus[strtolower((string) ($row[self::SKU_COLUMN_HEADING] ?? ''))] = true;
+            }
+            $this->applyMsiSourceItems($importedSkus);
+        }
+
         return $result;
+    }
+
+    /**
+     * Apply captured MSI source items via the inventory API, for the given
+     * (lowercased) set of imported SKUs. Spec per SKU: "code=qty[:status]"
+     * entries separated by ';'; status 1 (in stock) is the default.
+     *
+     * @param array<string, true> $importedSkus
+     */
+    private function applyMsiSourceItems(array $importedSkus): void
+    {
+        $sourceItems = [];
+        foreach ($this->msiSourceItems as $sku => $spec) {
+            if (!isset($importedSkus[strtolower($sku)])) {
+                continue;
+            }
+            foreach (explode(self::SEPARATOR, $spec) as $entry) {
+                $entry = trim($entry);
+                if ($entry === '' || !str_contains($entry, '=')) {
+                    continue;
+                }
+                [$code, $rest] = array_pad(explode('=', $entry, 2), 2, '');
+                $code = trim($code);
+                if ($code === '') {
+                    continue;
+                }
+                [$qty, $status] = array_pad(explode(':', trim($rest), 2), 2, null);
+                $sourceItem = $this->sourceItemFactory->create();
+                $sourceItem->setSku($sku);
+                $sourceItem->setSourceCode($code);
+                $sourceItem->setQuantity((float) $qty);
+                $sourceItem->setStatus(
+                    $status === null ? SourceItemInterface::STATUS_IN_STOCK : (int) $status
+                );
+                $sourceItems[] = $sourceItem;
+            }
+        }
+
+        if ($sourceItems === []) {
+            return;
+        }
+
+        try {
+            $this->sourceItemsSave->execute($sourceItems);
+            $this->log->logInfo(sprintf('Applied %d MSI source item(s).', count($sourceItems)));
+        } catch (\Exception $e) {
+            $this->log->logError(sprintf('Failed to apply MSI source items: %s', $e->getMessage()));
+        }
     }
 
     /**

@@ -137,6 +137,10 @@ class Widgets implements ComponentInterface
                     $value = $this->getThemeId($value);
                 }
 
+                if ($key == "page_groups" && is_array($value)) {
+                    $value = $this->buildPageGroups($value);
+                }
+
                 if ($widget->getData($key) == $value) {
                     $this->log->logComment(sprintf("Widget %s = %s", $key, $value), 1);
                     continue;
@@ -392,6 +396,39 @@ class Widgets implements ComponentInterface
             $storeIds[] = $storeView->getId();
         }
         return implode(',', $storeIds);
+    }
+
+    /**
+     * Build the `page_groups` structure Magento's Widget\Instance::beforeSave()
+     * expects (a flat list where each item names a page group and nests its
+     * params under that key) from the simplified configurator YAML list.
+     *
+     * Each YAML entry: { page_group, block, layout_handle?, for?, template?,
+     * page_id?, entities? }. Layout placement (the original `@todo`) is now
+     * configurable.
+     *
+     * @param array $pageGroups
+     * @return array
+     */
+    public function buildPageGroups(array $pageGroups): array
+    {
+        $built = [];
+        foreach ($pageGroups as $pageGroup) {
+            $type = $pageGroup['page_group'] ?? 'all_pages';
+            $built[] = [
+                'page_group' => $type,
+                $type => [
+                    'page_id' => (string) ($pageGroup['page_id'] ?? '0'),
+                    'layout_handle' => $pageGroup['layout_handle'] ?? 'default',
+                    'for' => $pageGroup['for'] ?? 'all',
+                    'block' => $pageGroup['block'] ?? '',
+                    'template' => $pageGroup['template'] ?? '',
+                    'entities' => $pageGroup['entities'] ?? '',
+                ],
+            ];
+        }
+
+        return $built;
     }
 
     public function getAlias(): string
