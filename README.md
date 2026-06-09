@@ -68,6 +68,28 @@ bin/magento configurator:run --env="local" -i                   # ignore missing
 bin/magento configurator:run --env="local" -v                   # verbose logging
 ```
 
+### Syncing from the database
+
+The reverse of `configurator:run` — read the current DB state and write it back
+into the source files, so changes made in the admin can be captured into git.
+Components opt in (implement `ExportableComponentInterface`); currently **config**
+is supported.
+
+```bash
+# Refresh the values of the config paths you already track, in place:
+bin/magento configurator:sync-from-db --component=config
+bin/magento configurator:sync-from-db --component=config --dry-run   # preview
+
+# Full export of everything in scope, optionally filtered and to a chosen file:
+bin/magento configurator:sync-from-db --component=config --all --path="web/" --output="app/etc/configurator/Config/web.yaml"
+```
+
+- Default mode refreshes only the entries already present in the source files
+  (low-noise); `--all` dumps everything in scope, `--path=` filters by prefix.
+- Encrypted config values are never written out, so secrets stay out of git.
+- Only values actually stored in `core_config_data` are pulled (defaults from
+  `config.xml`/`env.php` are left as-is).
+
 ## Reconciliation: modes & versioning
 
 Every component now applies the **same** rule for how config reconciles against
