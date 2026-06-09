@@ -1,0 +1,24 @@
+# Multi-Source-Inventory topology: sources, stocks, their links and the
+# website sales channels assigned to each stock. Run before the products
+# component so its `msi_sources` column has somewhere to write.
+sources:
+  warehouse_eu:
+    name: "EU Warehouse"
+    enabled: true
+    country_id: LV
+    postcode: "1001"
+    city: "Riga"
+  warehouse_us:
+    name: "US Warehouse"
+    enabled: true
+    country_id: US
+    postcode: "10001"
+    city: "New York"
+stocks:
+  eu_stock:
+    name: "EU Stock"
+    sources:
+      - default
+      - warehouse_eu
+    sales_channels:
+      - base

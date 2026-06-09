@@ -33,17 +33,29 @@ modernised, self-owned fork under the `Magebit\Configurator` namespace
   component reports an error, and prints a run summary
   (`created N, updated N, skipped N, errors N`). A single failing component no
   longer aborts the whole run.
+- **Uniform reconciliation** — every component honors `create`/`maintain` mode
+  and per-entity / per-component versioning through one shared gate (see below),
+  so `create` mode is safe on production.
+- **New capabilities** — MSI: `inventory_sources` (sources/stocks) + a
+  `products` `msi_sources` column; widget layout placement via `page_groups`;
+  optional Hyvä Commerce CMS components (`hyva_pages` / `hyva_blocks`).
 - **Documented config contract** — every component's source format is in
   [`docs/schema/`](docs/schema/README.md).
 
+> **Upgrading from the CtiDigital v1 module?** See
+> [`docs/UPGRADE.md`](docs/UPGRADE.md) — your config files keep working, but the
+> package/module names, PHP/Magento support and reconciliation behaviour changed.
+
 ## Getting started
 
-1. Create `app/etc/master.yaml` (see [`Samples/master.yaml`](Samples/master.yaml)).
+1. Install: `composer require magebit/module-magento2-configurator:^2.0`
+   (from your configured composer repository).
+2. Create `app/etc/master.yaml` (see [`Samples/master.yaml`](Samples/master.yaml)).
    Source paths are resolved relative to the Magento base dir, e.g.
    `app/etc/configurator/Attributes/attributes.yaml`.
-2. Enable the modules: `bin/magento module:enable Magebit_Configurator FireGento_FastSimpleImport`
+3. Enable the modules: `bin/magento module:enable Magebit_Configurator FireGento_FastSimpleImport`
    then `bin/magento setup:upgrade`.
-3. Apply: `bin/magento configurator:run --env="<environment>"`
+4. Apply: `bin/magento configurator:run --env="<environment>"`
 
 ### Usage
 
@@ -118,9 +130,9 @@ public contract for the v2 line.
 
 ## Components
 
-All components are implemented and execute-verified on Magento 2.4.7. Each links
-to its schema page. **Every component honors `create`/`maintain` mode and the
-versioning levers** described above — the notes below only call out extras.
+All 30 components are implemented and execute-verified on Magento 2.4.7. Each
+links to its schema page. **Every component honors `create`/`maintain` mode and
+the versioning levers** described above — the notes below only call out extras.
 
 | Component | Alias | Notes |
 |-----------|-------|-------|
