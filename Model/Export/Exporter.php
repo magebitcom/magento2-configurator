@@ -37,7 +37,7 @@ class Exporter
 
     /**
      * @param string[] $aliases Component aliases to export; empty = all exportable in master.yaml.
-     * @return array{written: string[], skipped: string[]} Files written and aliases skipped.
+     * @return array{written: string[], skipped: string[], errors: string[]} Files written, aliases skipped, errors.
      */
     public function export(array $aliases, bool $full, ?string $filter, ?string $output, bool $dryRun): array
     {
@@ -46,6 +46,7 @@ class Exporter
 
         $written = [];
         $skipped = [];
+        $errors = [];
 
         foreach ($targets as $alias) {
             $component = $this->componentList->getComponent($alias);
@@ -61,28 +62,60 @@ class Exporter
                 continue;
             }
 
-            $sources = (array) $master[$alias]['sources'];
-
-            if ($full) {
-                // One pass: write the full export to an explicit target or the first source.
-                $target = $output ?? $this->resolvePath((string) $sources[0]);
-                $data = $component->export(new ExportContext([], true, $filter));
-                $this->writeFile($target, $data, $dryRun);
-                $written[] = $target;
-                continue;
-            }
-
-            // Refresh mode: rewrite each source file in place with current DB values.
-            foreach ($sources as $source) {
-                $path = $this->resolvePath((string) $source);
-                $existing = $this->parseFile($path);
-                $data = $component->export(new ExportContext($existing, false, $filter));
-                $this->writeFile($path, $data, $dryRun);
-                $written[] = $path;
+            // Resilience: a single component failing must not abort the whole run.
+            try {
+                foreach ($this->exportComponent($component, (array) $master[$alias]['sources'], $full, $filter, $output, $dryRun) as $path) {
+                    $written[] = $path;
+                }
+            } catch (\Throwable $t) {
+                $message = sprintf(
+                    "[%s] export failed: %s (%s:%d)",
+                    $alias,
+                    $t->getMessage(),
+                    basename($t->getFile()),
+                    $t->getLine()
+                );
+                $this->log->logError($message);
+                $errors[] = $message;
             }
         }
 
-        return ['written' => $written, 'skipped' => $skipped];
+        return ['written' => $written, 'skipped' => $skipped, 'errors' => $errors];
+    }
+
+    /**
+     * Export a single component to its source file(s); returns the paths written.
+     *
+     * @param string[] $sources
+     * @return string[]
+     */
+    private function exportComponent(
+        ExportableComponentInterface $component,
+        array $sources,
+        bool $full,
+        ?string $filter,
+        ?string $output,
+        bool $dryRun
+    ): array {
+        if ($full) {
+            // One pass: write the full export to an explicit target or the first source.
+            $target = $output ?? $this->resolvePath((string) $sources[0]);
+            $data = $component->export(new ExportContext([], true, $filter, $dryRun));
+            $this->writeFile($target, $data, $dryRun);
+            return [$target];
+        }
+
+        // Refresh mode: rewrite each source file in place with current DB values.
+        $written = [];
+        foreach ($sources as $source) {
+            $path = $this->resolvePath((string) $source);
+            $existing = $this->parseFile($path);
+            $data = $component->export(new ExportContext($existing, false, $filter, $dryRun));
+            $this->writeFile($path, $data, $dryRun);
+            $written[] = $path;
+        }
+
+        return $written;
     }
 
     /**

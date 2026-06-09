@@ -394,7 +394,7 @@ class Pages implements ComponentInterface, ExportableComponentInterface
     {
         return $context->isFullExport()
             ? $this->exportAll($context->getFilter())
-            : $this->refreshTracked($context->getExistingData(), $context->getFilter());
+            : $this->refreshTracked($context->getExistingData(), $context->getFilter(), $context->isDryRun());
     }
 
     /**
@@ -407,7 +407,7 @@ class Pages implements ComponentInterface, ExportableComponentInterface
      * @param string|null $filter
      * @return array
      */
-    private function refreshTracked(array $existing, ?string $filter): array
+    private function refreshTracked(array $existing, ?string $filter, bool $dryRun): array
     {
         $out = [];
         foreach ($existing as $identifier => $entry) {
@@ -426,7 +426,7 @@ class Pages implements ComponentInterface, ExportableComponentInterface
 
             $pages = [];
             foreach ($entry['page'] as $pageData) {
-                $pages[] = $this->refreshPageEntry($id, (array) $pageData);
+                $pages[] = $this->refreshPageEntry($id, (array) $pageData, $dryRun);
             }
             $entry['page'] = $pages;
             $out[$id] = $entry;
@@ -442,9 +442,10 @@ class Pages implements ComponentInterface, ExportableComponentInterface
      *
      * @param string $identifier
      * @param array $pageData
+     * @param bool $dryRun
      * @return array
      */
-    private function refreshPageEntry(string $identifier, array $pageData): array
+    private function refreshPageEntry(string $identifier, array $pageData, bool $dryRun): array
     {
         $storeId = $this->resolveStoreId($pageData['stores'] ?? null);
         if ($storeId === null) {
@@ -469,19 +470,50 @@ class Pages implements ComponentInterface, ExportableComponentInterface
             return $pageData;
         }
 
+        // When the entry sources its content from an external file, write the
+        // current DB content into that file (creating it if missing) rather than
+        // inlining it into the YAML.
+        $usesSource = array_key_exists('source', $pageData) && (string) $pageData['source'] !== '';
+        if ($usesSource) {
+            $this->writeSourceContent((string) $pageData['source'], (string) $page->getContent(), $dryRun);
+        }
+
         foreach (self::EXPORT_FIELDS as $field) {
-            // Only refresh keys the source already tracks; never overwrite a
-            // `source` template by inlining the stored, rendered content.
             if (!array_key_exists($field, $pageData)) {
                 continue;
             }
-            if ($field === 'content' && array_key_exists('source', $pageData)) {
+            // Content is handled via the source file above; never inline it here.
+            if ($field === 'content' && $usesSource) {
                 continue;
             }
             $pageData[$field] = $page->getData($field);
         }
 
         return $pageData;
+    }
+
+    /**
+     * Write content into a `source` file (path relative to the Magento base dir),
+     * creating the directory/file if needed. No-op (logged) during a dry run.
+     */
+    private function writeSourceContent(string $source, string $content, bool $dryRun): void
+    {
+        $path = BP . '/' . ltrim($source, '/');
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would write source content to %s', $path));
+            return;
+        }
+
+        $dir = dirname($path);
+        // phpcs:ignore Magento2.Functions.DiscouragedFunction
+        if (!is_dir($dir)) {
+            // phpcs:ignore Magento2.Functions.DiscouragedFunction
+            mkdir($dir, 0755, true);
+        }
+        // phpcs:ignore Magento2.Functions.DiscouragedFunction
+        file_put_contents($path, $content);
+        $this->log->logInfo(sprintf('Wrote source content to %s', $path));
     }
 
     /**
