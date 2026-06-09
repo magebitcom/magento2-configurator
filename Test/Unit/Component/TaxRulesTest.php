@@ -190,6 +190,48 @@ class TaxRulesTest extends TestCase
         $this->assertSame(0, $result->getCreated());
     }
 
+    public function testRemovesExistingRule(): void
+    {
+        // Existing rule (id 42) flagged with remove -> deleted once, never saved.
+        $existing = $this->givenRuleLookup(42);
+
+        $this->taxRuleResource->expects($this->never())->method('save');
+        $this->taxRuleResource->expects($this->once())->method('delete')->with($existing);
+
+        $result = $this->execute($this->removalRows());
+
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getCreated());
+        $this->assertSame(0, $result->getSkipped());
+    }
+
+    public function testRemoveAbsentRuleIsSkipped(): void
+    {
+        // No rule with this code (id 0) -> nothing deleted, recorded as a skip.
+        $this->givenRuleLookup(0);
+
+        $this->taxRuleResource->expects($this->never())->method('save');
+        $this->taxRuleResource->expects($this->never())->method('delete');
+
+        $result = $this->execute($this->removalRows());
+
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testDryRunRemovalDoesNotDelete(): void
+    {
+        // Existing rule under dry run: intent recorded, nothing deleted.
+        $this->givenRuleLookup(42);
+
+        $this->taxRuleResource->expects($this->never())->method('save');
+        $this->taxRuleResource->expects($this->never())->method('delete');
+
+        $result = $this->execute($this->removalRows(), true);
+
+        $this->assertSame(1, $result->getRemoved());
+    }
+
     public function testExportFullDumpsEveryRule(): void
     {
         // A single rule mock plays every role: the iterated item, the
@@ -266,6 +308,29 @@ class TaxRulesTest extends TestCase
             0 => $this->header(),
             1 => ['VAT20', 'standard-rate', 'Retail Customer', 'Taxable Goods', '0', '0', '1'],
         ];
+    }
+
+    /**
+     * Source rows carrying a `remove` column set truthy for the single data row.
+     * The other columns are left empty: a removal must not depend on (or resolve)
+     * rate/tax-class values.
+     *
+     * @return array<int, array<int, string>>
+     */
+    private function removalRows(): array
+    {
+        return [
+            0 => $this->headerWithRemove(),
+            1 => ['VAT20', '', '', '', '', '', '', '1'],
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function headerWithRemove(): array
+    {
+        return [...$this->header(), 'remove'];
     }
 
     /**

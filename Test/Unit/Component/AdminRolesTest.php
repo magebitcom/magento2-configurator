@@ -137,6 +137,57 @@ class AdminRolesTest extends TestCase
         $this->assertSame(1, $result->getCreated());
     }
 
+    public function testRemovesExistingRole(): void
+    {
+        // Existing role flagged remove -> deleted once via the resource, no save, no rules.
+        $role = $this->givenRoleFromFactory(42);
+
+        $this->roleResource->expects($this->never())->method('save');
+        $this->rulesFactory->expects($this->never())->method('create');
+        $this->roleResource->expects($this->once())->method('delete')->with($this->isInstanceOf(Role::class));
+
+        $result = $this->execute([
+            ['name' => 'Editors', 'remove' => true],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getSkipped());
+    }
+
+    public function testRemoveAbsentRoleIsSkipped(): void
+    {
+        // No existing role (id 0) flagged remove -> nothing deleted, recorded as skipped.
+        $this->givenRoleFromFactory(0);
+
+        $this->roleResource->expects($this->never())->method('save');
+        $this->roleResource->expects($this->never())->method('delete');
+
+        $result = $this->execute([
+            ['name' => 'Editors', 'remove' => true],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testDryRunRemoveDoesNotDelete(): void
+    {
+        // Existing role flagged remove under dry-run: intent recorded, nothing deleted.
+        $this->givenRoleFromFactory(42);
+
+        $this->roleResource->expects($this->never())->method('delete');
+        $this->roleResource->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            ['name' => 'Editors', 'remove' => true],
+        ], true);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+    }
+
     public function testRecordsErrorWhenRoleNameMissing(): void
     {
         // Entry without a name is rejected; nothing is persisted.

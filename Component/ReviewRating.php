@@ -72,6 +72,13 @@ class ReviewRating implements ComponentInterface, ExportableComponentInterface
                 $ratingModel = $this->getReviewRating((string) $code);
                 $existed = (bool) $ratingModel->getId();
 
+                // Explicit removal: `remove: true` deletes the rating if it exists,
+                // in either mode. Idempotent — a rating already absent is skipped.
+                if (!empty($reviewRating['remove'])) {
+                    $this->removeReviewRating((string) $code, $ratingModel, $dryRun, $result);
+                    continue;
+                }
+
                 $version = $reviewRating['version'] ?? null;
                 $request = new ReconciliationRequest(
                     self::ALIAS,
@@ -140,6 +147,38 @@ class ReviewRating implements ComponentInterface, ExportableComponentInterface
         $rating = $this->ratingFactory->create();
         $rating->load($reviewRatingCode, 'rating_code');
         return $rating;
+    }
+
+    /**
+     * Delete a rating flagged with `remove: true`. Idempotent: a rating that is
+     * already absent records a skip rather than an error. Honors dry-run.
+     *
+     * @param string $code
+     * @param Rating $rating
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @return void
+     */
+    protected function removeReviewRating(
+        string $code,
+        Rating $rating,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
+        if (!$rating->getId()) {
+            $this->log->logComment(sprintf("Review rating '%s' not present, nothing to remove", $code));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove review rating %s', $code));
+        } else {
+            $this->ratingResource->delete($rating);
+            $this->log->logInfo(sprintf('Removed review rating %s', $code));
+        }
+
+        $result->recordRemoved();
     }
 
     /**

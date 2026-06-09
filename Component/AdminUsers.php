@@ -69,11 +69,20 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
             }
 
             foreach ($roleSet['users'] ?? [] as $userData) {
-                if (!$this->isValidUserData($userData, $result)) {
-                    continue;
-                }
-
                 try {
+                    // Explicit removal: `remove: true` deletes the user if it exists,
+                    // in either mode. Idempotent — a user already absent is skipped.
+                    // Checked before required-field validation so a removal entry,
+                    // which only needs an email, does not trip it.
+                    if (is_array($userData) && !empty($userData['remove'])) {
+                        $this->removeAdminUser($userData, $context->isDryRun(), $result);
+                        continue;
+                    }
+
+                    if (!$this->isValidUserData($userData, $result)) {
+                        continue;
+                    }
+
                     $this->createAdminUser($userData, $roleId, $context->getMode(), $context->isDryRun(), $result);
                 } catch (ValidatorException $e) {
                     $message = sprintf('Magento Framework Validation Exception: %s', $e->getMessage());
@@ -172,6 +181,43 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
         $this->gate->commitVersion($request, $dryRun);
         $outcome->record($result);
         $this->log->logInfo(sprintf('Admin User "%s" %s successfully', $fullName, $outcome->value));
+    }
+
+    /**
+     * Delete an admin user flagged with `remove: true`, matched by email.
+     * Idempotent: a user that is already absent records a skip rather than an
+     * error. Honors dry-run.
+     *
+     * @param array $userData
+     */
+    private function removeAdminUser(array $userData, bool $dryRun, ComponentResult $result): void
+    {
+        $email = $userData['email'] ?? null;
+        if ($email === null || $email === '') {
+            $message = 'Admin User removal entry is missing the required "email" field';
+            $this->log->logError($message);
+            $result->addError($message);
+            return;
+        }
+
+        $existing = $this->userFactory->create()->getCollection()
+            ->addFieldToFilter('email', $email)
+            ->getFirstItem();
+
+        if (!$existing->getId()) {
+            $this->log->logComment(sprintf("Admin User '%s' not present, nothing to remove", $email));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove Admin User %s', $email));
+        } else {
+            $this->userResource->delete($existing);
+            $this->log->logInfo(sprintf('Removed Admin User %s', $email));
+        }
+
+        $result->recordRemoved();
     }
 
     /**

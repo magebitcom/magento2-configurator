@@ -42,6 +42,7 @@ class Rewrites implements ComponentInterface, ExportableComponentInterface
     const REDIRECT_TYPE_CSV_KEY = 'redirectType';
     const DESCRIPTION_CSV_KEY = 'description';
     const VERSION_CSV_KEY = 'version';
+    const REMOVE_CSV_KEY = 'remove';
 
     public function __construct(
         private readonly UrlPersistInterface $urlPersist,
@@ -148,10 +149,23 @@ class Rewrites implements ComponentInterface, ExportableComponentInterface
         $rewrite = $this->urlRewriteFactory->create();
         $successMessage = 'URL Rewrite: "%s" created';
         $isUpdate = false;
-        $rewriteCount = $rewrite->getCollection()
+        $collection = $rewrite->getCollection()
             ->addFieldToFilter(self::REQUEST_PATH_KEY, $rewriteArray[self::REQUEST_PATH_CSV_KEY])
-            ->addFieldToFilter('store_id', $rewriteArray[self::STORE_ID_CSV_KEY])
-            ->getSize();
+            ->addFieldToFilter('store_id', $rewriteArray[self::STORE_ID_CSV_KEY]);
+        $rewriteCount = $collection->getSize();
+
+        // Explicit removal: a `remove: true` row deletes the rewrite if it exists,
+        // in either mode. Idempotent — a rewrite already absent is skipped.
+        if (!empty($rewriteArray[self::REMOVE_CSV_KEY])) {
+            $existing = $rewriteCount > 0 ? $collection->getFirstItem() : null;
+            $this->removeRewrite(
+                $rewriteArray[self::REQUEST_PATH_CSV_KEY],
+                $existing,
+                $dryRun,
+                $result
+            );
+            return;
+        }
 
         $version = isset($rewriteArray[self::VERSION_CSV_KEY]) && $rewriteArray[self::VERSION_CSV_KEY] !== ''
             ? (int) $rewriteArray[self::VERSION_CSV_KEY]
@@ -210,6 +224,40 @@ class Rewrites implements ComponentInterface, ExportableComponentInterface
 
         $isUpdate ? $result->recordUpdated() : $result->recordCreated();
         $this->gate->commitVersion($request, false);
+    }
+
+    /**
+     * Delete a URL rewrite flagged with `remove: true`. Idempotent: a rewrite that
+     * is already absent records a skip rather than an error. Honors dry-run.
+     *
+     * @param string $requestPath
+     * @param \Magento\UrlRewrite\Model\UrlRewrite|null $rewrite
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @return void
+     */
+    protected function removeRewrite(
+        string $requestPath,
+        $rewrite,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
+        if ($rewrite === null) {
+            $this->log->logComment(
+                sprintf("URL Rewrite '%s' not present, nothing to remove", $requestPath)
+            );
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove URL Rewrite %s', $requestPath));
+        } else {
+            $this->urlRewriteResource->delete($rewrite);
+            $this->log->logInfo(sprintf('Removed URL Rewrite %s', $requestPath));
+        }
+
+        $result->recordRemoved();
     }
 
     /**

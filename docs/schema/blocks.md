@@ -44,6 +44,7 @@ certain_stores_identifier:
 | `<identifier>.block[].content` | no | string | Inline block content. Use this instead of `source` when you don't need a template file. |
 | `<identifier>.block[].stores` | no | list | Store **codes** the block applies to. Each is resolved to a store id; an unknown code raises an error. When omitted the block is saved at default scope (store id 0). |
 | `<identifier>.block[].version` | no | int | Version number. The block is only re-applied when this value is greater than the last recorded version for this identifier (+ stores). Stripped before saving. |
+| `<identifier>.block[].remove` | no | bool | When truthy, **delete** the block (by `identifier`, narrowed by the first store code when `stores` is set) instead of creating/updating it. Applies in both `create` and `maintain` mode. Idempotent: a block already absent is recorded as skipped. All other fields on the entry are ignored when `remove` is set. |
 | `<identifier>.block[].<other>` | no | mixed | Any other key is set directly on the block via `setData()` (only when its value differs from the current value). |
 
 The `source` template is executed as PHP with `$escaper`
@@ -65,6 +66,11 @@ can call escaping helpers and Hyvä view models. A plain HTML file such as
 - **Versioning.** When `version` is set it is compared against the stored version
   (keyed by `blocks_<identifier>` plus the store codes). Only a higher version is
   treated as a new version; after a successful apply the new version is recorded.
+- **Removal.** `remove: true` on a definition deletes the matching block via the
+  block repository, in either mode, and records it as *removed* in the run summary.
+  A block that does not exist is recorded as *skipped* (no error), so the entry is
+  safe to keep in the file or remove once applied. Dry-run logs
+  `[dry-run] Would remove block <identifier>` and deletes nothing.
 - **Dry-run.** Logs `[dry-run] Would create/save block <identifier>` and
   `[dry-run] Would set version …`, records the create/update, but performs no
   `save()` and does not persist the version.

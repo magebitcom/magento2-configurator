@@ -31,14 +31,17 @@ modernised, self-owned fork under the `Magebit\Configurator` namespace
   persisting anything (raw SQL, imports and saves are all guarded).
 - **Meaningful exit codes** — `configurator:run` returns non-zero when any
   component reports an error, and prints a run summary
-  (`created N, updated N, skipped N, errors N`). A single failing component no
-  longer aborts the whole run.
+  (`created N, updated N, skipped N, removed N, errors N`). A single failing
+  component no longer aborts the whole run.
 - **Uniform reconciliation** — every component honors `create`/`maintain` mode
   and per-entity / per-component versioning through one shared gate (see below),
   so `create` mode is safe on production.
 - **New capabilities** — MSI: `inventory_sources` (sources/stocks) + a
   `products` `msi_sources` column; widget layout placement via `page_groups`;
-  optional Hyvä Commerce CMS components (`hyva_pages` / `hyva_blocks`).
+  optional Hyvä Commerce CMS components (`hyva_pages` / `hyva_blocks`);
+  opt-in entity removal via `remove: true` across the entity components (CMS,
+  config, widgets, rewrites, categories, attributes, tax rules, …) — see
+  [`docs/schema/`](docs/schema/README.md#removing-entities-remove-true).
 - **Documented config contract** — every component's source format is in
   [`docs/schema/`](docs/schema/README.md).
 

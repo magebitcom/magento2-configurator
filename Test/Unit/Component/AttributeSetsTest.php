@@ -233,6 +233,71 @@ class AttributeSetsTest extends TestCase
         $this->assertNotEmpty($result->getErrors());
     }
 
+    public function testRemovesExistingAttributeSet(): void
+    {
+        $this->givenAttributeSetExists('Shirts', 10);
+        $this->givenDefaultAttributeSetId(4);
+
+        $this->attributeSetRepository->expects($this->once())->method('deleteById')->with(10);
+        $this->attributeSetRepository->expects($this->never())->method('save');
+        $this->eavSetup->expects($this->never())->method('addAttributeSet');
+
+        $result = $this->execute([
+            ['name' => 'Shirts', 'remove' => true],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getSkipped());
+    }
+
+    public function testRemoveAbsentAttributeSetIsSkipped(): void
+    {
+        $this->givenAttributeSetMissing('Shirts');
+
+        $this->attributeSetRepository->expects($this->never())->method('deleteById');
+        $this->attributeSetRepository->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            ['name' => 'Shirts', 'remove' => true],
+        ]);
+
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testRemoveDoesNotDeleteDefaultAttributeSet(): void
+    {
+        // The resolved set is the entity-type default -> never deleted.
+        $this->givenAttributeSetExists('Default', 4);
+        $this->givenDefaultAttributeSetId(4);
+
+        $this->attributeSetRepository->expects($this->never())->method('deleteById');
+
+        $result = $this->execute([
+            ['name' => 'Default', 'remove' => true],
+        ]);
+
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testDryRunRemoveDoesNotDelete(): void
+    {
+        $this->givenAttributeSetExists('Shirts', 10);
+        $this->givenDefaultAttributeSetId(4);
+
+        $this->attributeSetRepository->expects($this->never())->method('deleteById');
+
+        $result = $this->execute([
+            ['name' => 'Shirts', 'remove' => true],
+        ], true);
+
+        // Intent is still recorded even though nothing is deleted.
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getSkipped());
+    }
+
     public function testFullExportReturnsEverySetInScope(): void
     {
         $this->givenExportEntityType(4);
@@ -343,6 +408,13 @@ class AttributeSetsTest extends TestCase
         $this->eavSetup->method('getAttributeSet')
             ->with(Product::ENTITY, $name)
             ->willReturn(['attribute_set_id' => $id, 'attribute_set_name' => $name]);
+    }
+
+    private function givenDefaultAttributeSetId(int $defaultSetId): void
+    {
+        $type = $this->createMock(Type::class);
+        $type->method('getDefaultAttributeSetId')->willReturn($defaultSetId);
+        $this->eavConfig->method('getEntityType')->with(Product::ENTITY)->willReturn($type);
     }
 
     private function givenExportEntityType(int $entityTypeId): void

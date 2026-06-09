@@ -21,6 +21,7 @@ class ComponentResult
     private int $created = 0;
     private int $updated = 0;
     private int $skipped = 0;
+    private int $removed = 0;
 
     /** @var string[] */
     private array $errors = [];
@@ -38,6 +39,11 @@ class ComponentResult
     public function recordSkipped(int $count = 1): void
     {
         $this->skipped += $count;
+    }
+
+    public function recordRemoved(int $count = 1): void
+    {
+        $this->removed += $count;
     }
 
     public function addError(string $message): void
@@ -58,6 +64,11 @@ class ComponentResult
     public function getSkipped(): int
     {
         return $this->skipped;
+    }
+
+    public function getRemoved(): int
+    {
+        return $this->removed;
     }
 
     /**
@@ -81,16 +92,18 @@ class ComponentResult
         $this->created += $other->created;
         $this->updated += $other->updated;
         $this->skipped += $other->skipped;
+        $this->removed += $other->removed;
         $this->errors = array_merge($this->errors, $other->errors);
     }
 
     public function summary(): string
     {
         return sprintf(
-            'created %d, updated %d, skipped %d, errors %d',
+            'created %d, updated %d, skipped %d, removed %d, errors %d',
             $this->created,
             $this->updated,
             $this->skipped,
+            $this->removed,
             count($this->errors)
         );
     }

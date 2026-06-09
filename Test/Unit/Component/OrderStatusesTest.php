@@ -196,6 +196,83 @@ class OrderStatusesTest extends TestCase
         $this->assertNotEmpty($result->getErrors());
     }
 
+    public function testRemoveDeletesExistingStatus(): void
+    {
+        // Exists -> delete() is called once, no save occurs.
+        $status = $this->givenStatusModel('awaiting_pick');
+        $status->expects($this->never())->method('setData');
+        $status->expects($this->never())->method('assignState');
+
+        $this->statusResource->expects($this->never())->method('save');
+        $this->statusResource->expects($this->once())->method('delete')->with($status);
+
+        $result = $this->execute([
+            ['state' => 'processing', 'statuses' => [
+                ['code' => 'awaiting_pick', 'name' => 'Awaiting Pick', 'remove' => true],
+            ]],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getCreated());
+    }
+
+    public function testRemoveAbsentStatusIsSkipped(): void
+    {
+        // load() leaves the model empty -> getStatus() null -> does not exist.
+        $status = $this->givenStatusModel(null);
+        $status->expects($this->never())->method('setData');
+
+        $this->statusResource->expects($this->never())->method('save');
+        $this->statusResource->expects($this->never())->method('delete');
+
+        $result = $this->execute([
+            ['state' => 'processing', 'statuses' => [
+                ['code' => 'awaiting_pick', 'name' => 'Awaiting Pick', 'remove' => true],
+            ]],
+        ]);
+
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testRemoveDryRunDeletesNothing(): void
+    {
+        $status = $this->givenStatusModel('awaiting_pick');
+
+        $this->statusResource->expects($this->never())->method('save');
+        $this->statusResource->expects($this->never())->method('delete');
+
+        $result = $this->execute([
+            ['state' => 'processing', 'statuses' => [
+                ['code' => 'awaiting_pick', 'name' => 'Awaiting Pick', 'remove' => true],
+            ]],
+        ], true);
+
+        // Dry run still records the intended removal.
+        $this->assertSame(1, $result->getRemoved());
+    }
+
+    public function testRemoveAssignedStatusIsSkippedWhenDeleteFails(): void
+    {
+        // A status still assigned to a state cannot be deleted; the resource
+        // throws and the run records a skip rather than crashing.
+        $status = $this->givenStatusModel('awaiting_pick');
+
+        $this->statusResource->expects($this->never())->method('save');
+        $this->statusResource->expects($this->once())->method('delete')->with($status)
+            ->willThrowException(new \Exception('Status is assigned to a state'));
+
+        $result = $this->execute([
+            ['state' => 'processing', 'statuses' => [
+                ['code' => 'awaiting_pick', 'name' => 'Awaiting Pick', 'remove' => true],
+            ]],
+        ]);
+
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
     public function testFullExportGroupsStatusesByState(): void
     {
         $this->givenStatusCollection([

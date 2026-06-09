@@ -94,6 +94,13 @@ class Widgets implements ComponentInterface, ExportableComponentInterface
 
             $widget = $this->findWidgetByInstanceTypeAndTitle($widgetData['instance_type'], $widgetData['title']);
 
+            // Explicit removal: `remove: true` deletes the widget if it exists,
+            // in either mode. Idempotent — a widget already absent is skipped.
+            if (!empty($widgetData['remove'])) {
+                $this->removeWidget($widgetData['title'], $widget, $dryRun, $result);
+                return;
+            }
+
             $request = new ReconciliationRequest(
                 self::ALIAS,
                 $widgetData['instance_type'] . '|' . $widgetData['title'],
@@ -122,6 +129,11 @@ class Widgets implements ComponentInterface, ExportableComponentInterface
             }
 
             foreach ($widgetData as $key => $value) {
+                // Skip the control key; it is not a widget field.
+                if ($key == "remove") {
+                    continue;
+                }
+
                 // @todo handle stores
                 // Comma separated
                 if ($key == "stores") {
@@ -186,6 +198,38 @@ class Widgets implements ComponentInterface, ExportableComponentInterface
             $this->log->logError($e->getMessage());
             $result->addError($e->getMessage());
         }
+    }
+
+    /**
+     * Delete a widget flagged with `remove: true`. Idempotent: a widget that is
+     * already absent records a skip rather than an error. Honors dry-run.
+     *
+     * @param string $title
+     * @param mixed $widget
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @return void
+     */
+    private function removeWidget(
+        string $title,
+        mixed $widget,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
+        if ($widget === null || !$widget->getId()) {
+            $this->log->logComment(sprintf("Widget '%s' not present, nothing to remove", $title));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove widget %s', $title));
+        } else {
+            $this->widgetResource->delete($widget);
+            $this->log->logInfo(sprintf('Removed widget %s', $title));
+        }
+
+        $result->recordRemoved();
     }
 
     /**

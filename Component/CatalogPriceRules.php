@@ -70,23 +70,31 @@ class CatalogPriceRules implements ComponentInterface, ExportableComponentInterf
         $rules = $data['rules'];
         $config = $data['config'] ?? [];
 
-        $ruleCount = count($rules);
+        // Rules flagged for explicit removal are deleted (not created/updated) by
+        // the processor, which records the removal/skip on $result itself. The
+        // remaining rules are processed normally and counted as created here.
+        $createCount = 0;
+        foreach ($rules as $ruleData) {
+            if (is_array($ruleData) && !empty($ruleData['remove'])) {
+                continue;
+            }
+            $createCount++;
+        }
 
         if ($context->isDryRun()) {
             $this->log->logInfo(
-                sprintf('[dry-run] Would process %d Catalog Price Rule(s)', $ruleCount)
+                sprintf('[dry-run] Would process %d Catalog Price Rule(s)', $createCount)
             );
-            $result->recordCreated($ruleCount);
-
-            return $result;
         }
 
         $this->processor->setData($rules)
             ->setConfig($config)
             ->setMode($context->getMode())
+            ->setDryRun($context->isDryRun())
+            ->setResult($result)
             ->process();
 
-        $result->recordCreated($ruleCount);
+        $result->recordCreated($createCount);
 
         return $result;
     }

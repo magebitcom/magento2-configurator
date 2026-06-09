@@ -74,6 +74,14 @@ class CustomerGroups implements ComponentInterface, ExportableComponentInterface
 
             foreach ($taxClassConfig['groups'] ?? [] as $group) {
                 try {
+                    // Explicit removal: `remove: true` deletes the group if it exists,
+                    // in either mode. Checked before required-field validation so a
+                    // removal entry never trips it. Idempotent — absent groups skip.
+                    if (!empty($group['remove'])) {
+                        $this->removeCustomerGroup($this->extractGroupName($group), $context->isDryRun(), $result);
+                        continue;
+                    }
+
                     $this->createCustomerGroup($this->extractGroupName($group), $taxClassId, $context, $result);
                 } catch (ComponentException $e) {
                     $this->log->logError($e->getMessage());
@@ -135,6 +143,29 @@ class CustomerGroups implements ComponentInterface, ExportableComponentInterface
             $outcome === ReconciliationOutcome::Create ? 'created' : 'updated'
         ));
         $outcome->record($result);
+    }
+
+    /**
+     * Delete a customer group flagged with `remove: true`. Idempotent: a group that
+     * is already absent records a skip rather than an error. Honors dry-run.
+     */
+    private function removeCustomerGroup(string $groupName, bool $dryRun, ComponentResult $result): void
+    {
+        $existing = $this->findGroup($groupName);
+        if ($existing === null) {
+            $this->log->logComment(sprintf("Customer Group '%s' not present, nothing to remove", $groupName));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove Customer Group %s', $groupName));
+        } else {
+            $this->groupRepository->deleteById((int) $existing->getId());
+            $this->log->logInfo(sprintf('Removed Customer Group %s', $groupName));
+        }
+
+        $result->recordRemoved();
     }
 
     private function findGroup(string $groupName): ?GroupInterface

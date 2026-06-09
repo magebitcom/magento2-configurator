@@ -48,6 +48,12 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
     ];
 
     /**
+     * Optional source column that, when truthy, removes the rule keyed by `code`
+     * instead of creating/updating it. Excluded from field-setting logic.
+     */
+    private const COLUMN_REMOVE = 'remove';
+
+    /**
      * Defines Customer Tax Class string
      */
     public const TAX_CLASS_TYPE_CUSTOMER = 'CUSTOMER';
@@ -92,9 +98,19 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
                 continue;
             }
 
-            $ruleData = $this->formatArray($taxRuleAttributes, $rule, $context->isDryRun());
-
             try {
+                // Explicit removal: `remove` column truthy deletes the rule keyed by
+                // `code` in either mode. Resolved before formatArray() so its tax-class
+                // side effects (auto-create) never run for a removal row, and before any
+                // required-field validation.
+                if ($this->isRemoval($taxRuleAttributes, $rule)) {
+                    $this->removeTaxRule((string) $rule[0], $context->isDryRun(), $result);
+
+                    continue;
+                }
+
+                $ruleData = $this->formatArray($taxRuleAttributes, $rule, $context->isDryRun());
+
                 $this->createTaxRule($ruleData, $context, $result);
             } catch (ComponentException $e) {
                 $this->log->logError($e->getMessage());
@@ -270,6 +286,57 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
             sprintf('Tax Rule "%s" %s.', $ruleData['code'], $outcome->value)
         );
         $outcome->record($result);
+    }
+
+    /**
+     * Decide whether the given CSV row carries a truthy `remove` column. The
+     * column is matched by header position (the same way every other column is
+     * read), so it is optional and order-independent.
+     *
+     * @param array $taxRuleAttributes
+     * @param array $rule
+     * @return bool
+     */
+    private function isRemoval(array $taxRuleAttributes, array $rule): bool
+    {
+        $column = array_search(self::COLUMN_REMOVE, $taxRuleAttributes, true);
+        if ($column === false) {
+            return false;
+        }
+
+        return !empty($rule[$column]);
+    }
+
+    /**
+     * Delete the tax rule identified by $code. Idempotent: a rule that is already
+     * absent records a skip rather than an error. Honors dry-run.
+     *
+     * @param string $code
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     */
+    private function removeTaxRule(string $code, bool $dryRun, ComponentResult $result): void
+    {
+        $rule = $this->ruleFactory->create();
+        $existing = $rule->getCollection()->addFieldToFilter('code', $code)->getFirstItem();
+
+        if (!$existing->getId()) {
+            $this->log->logComment(
+                sprintf("Tax Rule '%s' not present, nothing to remove", $code)
+            );
+            $result->recordSkipped();
+
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove Tax Rule %s', $code));
+        } else {
+            $this->taxRuleResource->delete($existing);
+            $this->log->logInfo(sprintf('Removed Tax Rule %s', $code));
+        }
+
+        $result->recordRemoved();
     }
 
     /**

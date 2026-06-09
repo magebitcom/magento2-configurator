@@ -324,6 +324,60 @@ class BlocksTest extends TestCase
         $this->assertSame($tracked['gone'], $out['gone']);
     }
 
+    public function testRemoveDeletesExistingBlock(): void
+    {
+        // `remove: true` on an existing block deletes it (in either mode) without
+        // going through the create/update path.
+        $existing = $this->givenBlockMock(['title' => 'Old']);
+        $collection = $this->givenCollection([$existing]);
+        $this->blockFactory->method('create')->willReturn($this->givenCollectionSource($collection));
+
+        $this->blockRepository->expects($this->never())->method('save');
+        $this->blockRepository->expects($this->once())->method('deleteById')->with(1);
+
+        $result = $this->execute([
+            'my-block' => ['block' => [['remove' => true]]],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getCreated());
+    }
+
+    public function testRemoveSkipsWhenBlockAbsent(): void
+    {
+        // `remove: true` on a block that does not exist is idempotent: skip, no delete.
+        $collection = $this->givenCollection([]);
+        $this->blockFactory->method('create')->willReturn($this->givenCollectionSource($collection));
+
+        $this->blockRepository->expects($this->never())->method('deleteById');
+        $this->blockRepository->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            'my-block' => ['block' => [['remove' => true]]],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testRemoveDryRunDoesNotDelete(): void
+    {
+        // Dry-run records the removal intent but performs no delete.
+        $existing = $this->givenBlockMock(['title' => 'Old']);
+        $collection = $this->givenCollection([$existing]);
+        $this->blockFactory->method('create')->willReturn($this->givenCollectionSource($collection));
+
+        $this->blockRepository->expects($this->never())->method('deleteById');
+
+        $result = $this->execute([
+            'my-block' => ['block' => [['remove' => true]]],
+        ], true);
+
+        $this->assertSame(1, $result->getRemoved());
+    }
+
     /**
      * @param array $blocks value of the source data (keyed by block identifier)
      */

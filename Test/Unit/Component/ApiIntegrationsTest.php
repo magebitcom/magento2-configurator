@@ -189,6 +189,63 @@ class ApiIntegrationsTest extends TestCase
         $this->assertSame(0, $result->getCreated());
     }
 
+    public function testRemoveDeletesExistingIntegration(): void
+    {
+        $this->givenLookupReturnsId(99);
+
+        // Existing integration is deleted via the service; never saved/created/updated.
+        $this->integrationService->expects($this->once())->method('delete')->with(99);
+        $this->integrationService->expects($this->never())->method('create');
+        $this->integrationService->expects($this->never())->method('update');
+        $this->tokenResource->expects($this->never())->method('save');
+
+        $row = $this->givenRow();
+        $row['remove'] = true;
+
+        $result = $this->execute([$row]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getCreated());
+    }
+
+    public function testRemoveAbsentIntegrationIsSkipped(): void
+    {
+        $this->givenLookupReturnsId(null);
+
+        // Nothing to delete -> skipped, no delete call, no error.
+        $this->integrationService->expects($this->never())->method('delete');
+        $this->integrationService->expects($this->never())->method('create');
+        $this->integrationService->expects($this->never())->method('update');
+
+        $row = $this->givenRow();
+        $row['remove'] = true;
+
+        $result = $this->execute([$row]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testRemoveDryRunDeletesNothing(): void
+    {
+        $this->givenLookupReturnsId(99);
+
+        // Dry-run records intent but performs no delete.
+        $this->integrationService->expects($this->never())->method('delete');
+        $this->integrationService->expects($this->never())->method('create');
+        $this->integrationService->expects($this->never())->method('update');
+
+        $row = $this->givenRow();
+        $row['remove'] = true;
+
+        $result = $this->execute([$row], true);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+    }
+
     public function testFullExportDumpsEveryIntegrationWithoutSecrets(): void
     {
         $integration = $this->givenIntegrationModel(

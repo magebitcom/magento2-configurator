@@ -234,6 +234,83 @@ class CategoriesTest extends TestCase
         $this->assertSame(2, $result->getCreated());
     }
 
+    public function testRemovesExistingCategory(): void
+    {
+        $this->givenStoreGroup(1, 2);
+        $root = $this->givenRootCategory(2);
+
+        // The configured child resolves to an existing category (has an id).
+        $existing = $this->givenExistingCategory(55);
+        $this->givenChildLookupReturns($existing);
+
+        $this->categoryFactory->method('create')->willReturnOnConsecutiveCalls($root, $existing);
+
+        // remove: true -> delete once, never save.
+        $this->categoryResource->expects($this->once())->method('delete')->with($existing);
+        $this->categoryResource->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            'categories' => [
+                ['store_group' => 'Main Website Store', 'categories' => [['name' => 'Shirts', 'remove' => true]]],
+            ],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+        $this->assertSame(0, $result->getCreated());
+        $this->assertSame(0, $result->getUpdated());
+    }
+
+    public function testRemoveAbsentCategoryIsSkipped(): void
+    {
+        $this->givenStoreGroup(1, 2);
+        $root = $this->givenRootCategory(2);
+
+        // The configured child resolves to a brand new (id-less) category -> absent.
+        $newCategory = $this->givenNewCategory();
+        $this->givenChildLookupReturns($newCategory);
+
+        $this->categoryFactory->method('create')->willReturnOnConsecutiveCalls($root, $newCategory);
+
+        // Absent entity -> no delete, no save.
+        $this->categoryResource->expects($this->never())->method('delete');
+        $this->categoryResource->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            'categories' => [
+                ['store_group' => 'Main Website Store', 'categories' => [['name' => 'Shirts', 'remove' => true]]],
+            ],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(0, $result->getRemoved());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testDryRunDoesNotDeleteButRecordsRemoval(): void
+    {
+        $this->givenStoreGroup(1, 2);
+        $root = $this->givenRootCategory(2);
+
+        $existing = $this->givenExistingCategory(55);
+        $this->givenChildLookupReturns($existing);
+
+        $this->categoryFactory->method('create')->willReturnOnConsecutiveCalls($root, $existing);
+
+        // Dry-run records the intent but never deletes.
+        $this->categoryResource->expects($this->never())->method('delete');
+        $this->categoryResource->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            'categories' => [
+                ['store_group' => 'Main Website Store', 'categories' => [['name' => 'Shirts', 'remove' => true]]],
+            ],
+        ], true);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(1, $result->getRemoved());
+    }
+
     public function testFullExportDumpsTreeUnderEachGroup(): void
     {
         // One store group "Main Website Store" with root category id 2.

@@ -87,6 +87,14 @@ class AttributeSets implements ComponentInterface, ExportableComponentInterface
         $existingId = is_array($attributeSetData) ? ($attributeSetData['attribute_set_id'] ?? null) : null;
         $exists = !empty($existingId);
 
+        // Explicit removal: `remove: true` deletes the set if it exists, in either
+        // mode. Idempotent — a set already absent is skipped. Checked before the
+        // gate and any required-field handling so it is always honored.
+        if (!empty($attributeSetConfig['remove'])) {
+            $this->removeAttributeSet((string) $name, $exists ? (int) $existingId : false, $dryRun, $result);
+            return;
+        }
+
         $version = $attributeSetConfig['version'] ?? null;
         $request = new ReconciliationRequest(
             self::ALIAS,
@@ -135,6 +143,49 @@ class AttributeSets implements ComponentInterface, ExportableComponentInterface
 
         $this->gate->commitVersion($request, $dryRun);
         $outcome->record($result);
+    }
+
+    /**
+     * Delete an attribute set flagged with `remove: true`. Idempotent: a set that
+     * is already absent records a skip rather than an error. Honors dry-run. The
+     * entity-type default attribute set is never deleted — it would orphan every
+     * product still assigned to it.
+     *
+     * @param string $name
+     * @param false|int $attributeSetId
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @return void
+     */
+    protected function removeAttributeSet(
+        string $name,
+        false|int $attributeSetId,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
+        if (!$attributeSetId) {
+            $this->log->logComment(sprintf("Attribute set '%s' not present, nothing to remove", $name));
+            $result->recordSkipped();
+            return;
+        }
+
+        $defaultSetId = (int) $this->eavConfig->getEntityType(Product::ENTITY)->getDefaultAttributeSetId();
+        if ($attributeSetId === $defaultSetId) {
+            $this->log->logComment(
+                sprintf("Attribute set '%s' is the default set and cannot be removed, skipped", $name)
+            );
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove attribute set %s', $name));
+        } else {
+            $this->attributeSetRepository->deleteById($attributeSetId);
+            $this->log->logInfo(sprintf('Removed attribute set %s', $name));
+        }
+
+        $result->recordRemoved();
     }
 
     protected function addAttributeGroups(AttributeSetInterface $attributeSetEntity, array $attributeGroupData): void

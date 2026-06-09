@@ -85,6 +85,13 @@ class OrderStatuses implements ComponentInterface, ExportableComponentInterface
             $statusResource->load($status, $code);
             $exists = (bool) $status->getStatus();
 
+            // Explicit removal: `remove: true` deletes the status if it exists,
+            // in either mode. Idempotent — a status already absent is skipped.
+            if (!empty($statusData['remove'])) {
+                $this->removeOrderStatus($statusData, $statusResource, $status, $exists, $dryRun, $result);
+                continue;
+            }
+
             $version = $statusData['version'] ?? null;
             $request = new ReconciliationRequest(
                 self::ALIAS,
@@ -124,6 +131,57 @@ class OrderStatuses implements ComponentInterface, ExportableComponentInterface
                 sprintf('Order status %s %s', $statusData['name'], $outcome->value)
             );
             $outcome->record($result);
+        }
+    }
+
+    /**
+     * Delete an order status flagged with `remove: true`. Idempotent: a status
+     * that is already absent records a skip rather than an error. Honors dry-run.
+     * A status still assigned to a state cannot be deleted by Magento — the
+     * resource throws, which is caught and recorded as a skip rather than
+     * crashing the run.
+     *
+     * @param array $statusData
+     * @param StatusResource $statusResource
+     * @param Status $status
+     * @param bool $exists
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @return void
+     */
+    protected function removeOrderStatus(
+        array $statusData,
+        StatusResource $statusResource,
+        Status $status,
+        bool $exists,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
+        $name = $statusData['name'] ?? $statusData['code'];
+
+        if (!$exists) {
+            $this->log->logComment(sprintf("Order status '%s' not present, nothing to remove", $name));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove order status %s', $name));
+            $result->recordRemoved();
+            return;
+        }
+
+        try {
+            $statusResource->delete($status);
+            $this->log->logInfo(sprintf('Removed order status %s', $name));
+            $result->recordRemoved();
+        } catch (\Exception $e) {
+            // A status still assigned to a state (or otherwise in use) cannot be
+            // deleted; record a skip and keep the run alive.
+            $this->log->logError(
+                sprintf('Could not remove order status %s: %s', $name, $e->getMessage())
+            );
+            $result->recordSkipped();
         }
     }
 

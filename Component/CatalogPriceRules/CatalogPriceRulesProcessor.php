@@ -11,6 +11,7 @@ namespace Magebit\Configurator\Component\CatalogPriceRules;
 use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\ComponentProcessorInterface;
 use Magebit\Configurator\Api\LoggerInterface;
+use Magebit\Configurator\Model\ComponentResult;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
 use Magento\CatalogRule\Api\CatalogRuleRepositoryInterface;
@@ -64,6 +65,16 @@ class CatalogPriceRulesProcessor implements ComponentProcessorInterface
     private $mode = ComponentMode::Maintain;
 
     /**
+     * @var bool
+     */
+    private $dryRun = false;
+
+    /**
+     * @var ComponentResult|null
+     */
+    private $result = null;
+
+    /**
      * CatalogPriceRules constructor.
      *
      * @param LoggerInterface $logger
@@ -94,6 +105,30 @@ class CatalogPriceRulesProcessor implements ComponentProcessorInterface
     public function setMode(ComponentMode $mode)
     {
         $this->mode = $mode;
+
+        return $this;
+    }
+
+    /**
+     * @param bool $dryRun
+     *
+     * @return $this
+     */
+    public function setDryRun(bool $dryRun)
+    {
+        $this->dryRun = $dryRun;
+
+        return $this;
+    }
+
+    /**
+     * @param ComponentResult $result
+     *
+     * @return $this
+     */
+    public function setResult(ComponentResult $result)
+    {
+        $this->result = $result;
 
         return $this;
     }
@@ -155,6 +190,14 @@ class CatalogPriceRulesProcessor implements ComponentProcessorInterface
             // Get the first rule
             $rule = $ruleCollection->getFirstItem();
 
+            // Explicit removal: `remove: true` deletes the rule if it exists,
+            // in either mode. Idempotent — a rule already absent is skipped.
+            if (!empty($ruleData['remove'])) {
+                $this->removeRule((string) $ruleData['name'], $rule);
+                $ite++;
+                continue;
+            }
+
             $version = $ruleData['version'] ?? null;
             $request = new ReconciliationRequest(
                 'catalog_price_rules',
@@ -178,15 +221,22 @@ class CatalogPriceRulesProcessor implements ComponentProcessorInterface
                 $rule = $this->ruleFactory->create();
             }
 
-            unset($ruleData['version']);
+            unset($ruleData['version'], $ruleData['remove']);
 
             /** @var Rule $rule */
             $this->fillRuleWithData($rule, $ruleData);
 
             try {
-                // Save the rule
-                $this->catalogRuleRepo->save($rule);
-                $this->gate->commitVersion($request, false);
+                if ($this->dryRun) {
+                    $this->logger->logInfo(sprintf(
+                        '[dry-run] Would save rule "%s"',
+                        $ruleData['name']
+                    ), 1);
+                } else {
+                    // Save the rule
+                    $this->catalogRuleRepo->save($rule);
+                }
+                $this->gate->commitVersion($request, $this->dryRun);
             } catch (\Exception $ex) {
                 $this->logger->logError($ex->getMessage());
             }
@@ -195,11 +245,50 @@ class CatalogPriceRulesProcessor implements ComponentProcessorInterface
         }
 
         if ($this->isApplyAll()) {
-            $this->logger->logInfo('- Applying all rules...');
-            $this->ruleJob->applyAll();
+            if ($this->dryRun) {
+                $this->logger->logInfo('- [dry-run] Would apply all rules...');
+            } else {
+                $this->logger->logInfo('- Applying all rules...');
+                $this->ruleJob->applyAll();
+            }
         }
 
         $this->logger->logInfo('Catalog price rules configuration completed.');
+    }
+
+    /**
+     * Delete a catalog price rule flagged with `remove: true`. Idempotent: a rule
+     * that is already absent records a skip rather than an error. Honors dry-run.
+     *
+     * @param string $name
+     * @param Rule $rule
+     *
+     * @return void
+     */
+    private function removeRule(string $name, Rule $rule)
+    {
+        try {
+            if ($rule->getId() === null || !$rule->getId()) {
+                $this->logger->logComment(
+                    sprintf('Rule "%s" not present, nothing to remove', $name),
+                    1
+                );
+                $this->result?->recordSkipped();
+
+                return;
+            }
+
+            if ($this->dryRun) {
+                $this->logger->logInfo(sprintf('[dry-run] Would remove rule "%s"', $name), 1);
+            } else {
+                $this->catalogRuleRepo->deleteById((int) $rule->getId());
+                $this->logger->logInfo(sprintf('Removed rule "%s"', $name), 1);
+            }
+
+            $this->result?->recordRemoved();
+        } catch (\Exception $ex) {
+            $this->logger->logError($ex->getMessage());
+        }
     }
 
     /**

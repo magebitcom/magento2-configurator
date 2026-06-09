@@ -175,6 +175,15 @@ class Categories implements ComponentInterface, ExportableComponentInterface
 
             $exists = (bool) $category->getId();
 
+            // Explicit removal: `remove: true` deletes the category if it exists,
+            // in either mode (not routed through the gate). Idempotent — a category
+            // already absent is skipped. Note: deleting a category also deletes its
+            // entire subtree, which is the expected behaviour for an explicit remove.
+            if (!empty($categoryValues['remove'])) {
+                $this->removeCategory($categoryValues['name'], $exists ? $category : false, $dryRun, $result);
+                continue;
+            }
+
             $version = $categoryValues['version'] ?? null;
             $request = new ReconciliationRequest(
                 self::ALIAS,
@@ -196,6 +205,7 @@ class Categories implements ComponentInterface, ExportableComponentInterface
                         $category->setData($attribute, $value);
                         break;
                     case 'category':
+                    case 'remove':
                         break;
                     case 'image':
                         // phpcs:ignore Magento2.Functions.DiscouragedFunction
@@ -268,6 +278,39 @@ class Categories implements ComponentInterface, ExportableComponentInterface
                 $this->createOrUpdateCategory($category, $categoryValues['categories'], $mode, $dryRun, $result);
             }
         }
+    }
+
+    /**
+     * Delete a category flagged with `remove: true`. Idempotent: a category that is
+     * already absent records a skip rather than an error. Honors dry-run. Deleting a
+     * category also deletes its subtree, which is acceptable for an explicit remove.
+     *
+     * @param string $name
+     * @param Category|false $category
+     * @param bool $dryRun
+     * @param ComponentResult $result
+     * @return void
+     */
+    protected function removeCategory(
+        string $name,
+        Category|false $category,
+        bool $dryRun,
+        ComponentResult $result
+    ): void {
+        if (!$category) {
+            $this->log->logComment(sprintf("Category '%s' not present, nothing to remove", $name));
+            $result->recordSkipped();
+            return;
+        }
+
+        if ($dryRun) {
+            $this->log->logInfo(sprintf('[dry-run] Would remove category %s', $name));
+        } else {
+            $this->categoryResource->delete($category);
+            $this->log->logInfo(sprintf('Removed category %s', $name));
+        }
+
+        $result->recordRemoved();
     }
 
     /**

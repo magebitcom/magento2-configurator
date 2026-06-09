@@ -73,7 +73,7 @@ already exists in create mode and do not diff individual attributes (so
 ## 4. CLI / CI changes
 
 - **Exit codes are now meaningful** — `configurator:run` returns non-zero if any
-  component records an error, and prints `created N, updated N, skipped N, errors N`.
+  component records an error, and prints `created N, updated N, skipped N, removed N, errors N`.
   Update CI/deploy scripts that assumed exit `0`.
 - **`--dry-run`** previews changes without writing (raw SQL, imports and saves are
   all guarded).
