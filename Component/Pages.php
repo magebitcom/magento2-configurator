@@ -281,18 +281,30 @@ class Pages implements ComponentInterface, ExportableComponentInterface
                     }
                 }
 
-                // Process stores
-                $page->setStores([0]);
+                // Resolve the desired store assignment: default scope ([0]) unless the
+                // source pins the page to specific store views.
+                $desiredStores = [0];
                 if (isset($pageData['stores'])) {
-                    $page->unsetData('store_id');
-                    $page->unsetData('store_data');
-
-                    $stores = [];
+                    $desiredStores = [];
                     foreach ($pageData['stores'] as $code) {
-                        $stores[] = $store = $this->storeRepository->get($code)->getId();
+                        $desiredStores[] = (int) $this->storeRepository->get($code)->getId();
                     }
+                }
 
-                    $page->setStores($stores);
+                // Only (re)assign stores when the assignment actually differs from what
+                // is stored. Setting it unconditionally marked the model dirty and
+                // produced a phantom "Save page" on every run for unchanged pages.
+                $currentStores = array_map('intval', (array) $page->getData('store_id'));
+                sort($currentStores);
+                $sortedDesired = $desiredStores;
+                sort($sortedDesired);
+
+                if ($isNew || $currentStores !== $sortedDesired) {
+                    if (isset($pageData['stores'])) {
+                        $page->unsetData('store_id');
+                        $page->unsetData('store_data');
+                    }
+                    $page->setStores($desiredStores);
                 }
 
                 //we only need to save if the model has changed
