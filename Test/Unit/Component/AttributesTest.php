@@ -142,6 +142,52 @@ class AttributesTest extends TestCase
         $this->assertSame(1, $result->getSkipped());
     }
 
+    public function testAddAttributeOnlyKeysDoNotLogUnmappedError(): void
+    {
+        // The loaded row carries label + input but not the addAttribute-only keys
+        // (sort_order, group, visible) which live in eav_entity_attribute / are
+        // scope-specific. Their absence must not be logged as unmapped.
+        $this->givenExistingAttribute(['frontend_label' => 'Colour', 'frontend_input' => 'text']);
+
+        $logged = $this->captureErrors();
+
+        $this->execute([
+            'colour' => [
+                'label' => 'Colour',
+                'input' => 'text',
+                'sort_order' => 5,
+                'group' => 'General',
+                'visible' => 1,
+            ],
+        ], false, null, ComponentMode::Maintain);
+
+        $unmapped = array_filter(
+            $logged->messages,
+            static fn (string $m): bool => str_contains($m, 'does not exist or is not mapped')
+        );
+        $this->assertSame([], $unmapped);
+    }
+
+    public function testGenuinelyUnknownAbsentKeyStillLogsUnmappedError(): void
+    {
+        // A key that is neither mapped nor a known addAttribute-only key keeps the
+        // diagnostic, so real typos/misconfiguration are still surfaced.
+        $this->givenExistingAttribute(['frontend_label' => 'Colour', 'frontend_input' => 'text']);
+
+        $logged = $this->captureErrors();
+
+        $this->execute([
+            'colour' => ['label' => 'Colour', 'input' => 'text', 'totally_bogus_key' => 1],
+        ], false, null, ComponentMode::Maintain);
+
+        $matches = array_filter(
+            $logged->messages,
+            static fn (string $m): bool => str_contains($m, 'totally_bogus_key')
+                && str_contains($m, 'does not exist or is not mapped')
+        );
+        $this->assertNotEmpty($matches);
+    }
+
     public function testDryRunDoesNotPersist(): void
     {
         $this->eavSetup->method('getAttribute')->willReturn(false);
@@ -308,6 +354,26 @@ class AttributesTest extends TestCase
     private function givenExistingAttribute(array $columns): void
     {
         $this->eavSetup->method('getAttribute')->willReturn(array_merge(['attribute_id' => 5], $columns));
+    }
+
+    /**
+     * Capture every message passed to LoggerInterface::logError(). Returns a
+     * holder whose `messages` array fills (by object reference) as logError()
+     * is called.
+     *
+     * @return object{messages: string[]}
+     */
+    private function captureErrors(): object
+    {
+        $sink = new \stdClass();
+        $sink->messages = [];
+        $this->log->method('logError')->willReturnCallback(
+            static function ($message) use ($sink): void {
+                $sink->messages[] = (string) $message;
+            }
+        );
+
+        return $sink;
     }
 
     private function givenOption(string $value, string $label): Option&MockObject

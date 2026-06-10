@@ -26,6 +26,25 @@ class TaxRates implements ComponentInterface, ExportableComponentInterface
     private const ALIAS = 'taxrates';
     private const DESCRIPTION = 'Component to create Tax Rates';
 
+    /**
+     * The header Magento's CsvImportHandler documents/expects, in the exact
+     * positional order getSortedData() emits each data row. The importer keys
+     * rows by position (not header name), so emitting this canonical header keeps
+     * the file's header consistent with its data and matches what a stricter
+     * importer / admin re-export round-trip expects, instead of the machine-key
+     * header carried in from the source file.
+     */
+    private const IMPORT_HEADER = [
+        'Code',
+        'Country',
+        'State',
+        'Zip/Post Code',
+        'Rate',
+        'Zip/Post is Range',
+        'Range From',
+        'Range To',
+    ];
+
     public function __construct(
         private readonly CsvImportHandler $csvImportHandler,
         private readonly LoggerInterface $log,
@@ -99,8 +118,10 @@ class TaxRates implements ComponentInterface, ExportableComponentInterface
 
         foreach ($data as $index => $rate) {
             if ($index === 0) {
-                $sortedData[] = $rate;
-                continue; // Skip the header row
+                // Emit Magento's canonical header rather than the source machine-key
+                // header, so the header matches the re-ordered data columns below.
+                $sortedData[] = self::IMPORT_HEADER;
+                continue;
             }
 
             $relativeData = array_combine($data[0], $rate);

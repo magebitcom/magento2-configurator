@@ -74,6 +74,24 @@ class Attributes implements ComponentInterface, ExportableComponentInterface
     ];
 
     /**
+     * Keys EavSetup::addAttribute() accepts but that are not stored on the row
+     * returned by getAttribute() — they live in eav_entity_attribute (the
+     * attribute-set/group pivot) or are scope-specific, and which ones are absent
+     * depends on the entity type. They cannot be diffed against the loaded
+     * attribute, so when absent they must be skipped silently rather than reported
+     * as "does not exist or is not mapped". When the entity type does expose one of
+     * them on the row, it is still diffed normally.
+     *
+     * @var array
+     */
+    protected $addAttributeOnly = [
+        'visible',
+        'sort_order',
+        'group',
+        'position',
+    ];
+
+    /**
      * @var string
      */
     protected $entityTypeId = Product::ENTITY;
@@ -296,11 +314,15 @@ class Attributes implements ComponentInterface, ExportableComponentInterface
                 continue;
             }
             if (!array_key_exists($name, $attributeArray)) {
-                $this->log->logError(sprintf(
-                    'Attribute %s type %s does not exist or is not mapped',
-                    $attributeCode,
-                    $name
-                ), $nest);
+                // Known addAttribute-only keys aren't on the loaded row for this
+                // entity type; their absence is expected, not a misconfiguration.
+                if (!in_array($name, $this->addAttributeOnly, true)) {
+                    $this->log->logError(sprintf(
+                        'Attribute %s type %s does not exist or is not mapped',
+                        $attributeCode,
+                        $name
+                    ), $nest);
+                }
                 continue;
             }
 

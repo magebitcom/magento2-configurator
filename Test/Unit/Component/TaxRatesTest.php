@@ -95,6 +95,35 @@ class TaxRatesTest extends TestCase
         $this->assertTrue($result->isSuccessful());
     }
 
+    public function testImportFileUsesCanonicalMagentoHeader(): void
+    {
+        // Capture the CSV handed to the importer before the component unlinks it.
+        $captured = [];
+        $this->csvImportHandler->expects($this->once())
+            ->method('importFromCsvFile')
+            ->willReturnCallback(static function (array $file) use (&$captured): void {
+                $handle = fopen($file['tmp_name'], 'r');
+                while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
+                    $captured[] = $row;
+                }
+                fclose($handle);
+            });
+
+        $this->execute($this->sampleSource(), false, ComponentMode::Maintain);
+
+        // Row 0 is Magento's canonical header, not the source machine-key header.
+        $this->assertSame(
+            ['Code', 'Country', 'State', 'Zip/Post Code', 'Rate', 'Zip/Post is Range', 'Range From', 'Range To'],
+            $captured[0]
+        );
+        // The data row lines up positionally with that header: postcode at index 3,
+        // rate at index 4 (the order getSortedData emits).
+        $this->assertSame('US-CA-Rate', $captured[1][0]);
+        $this->assertSame('US', $captured[1][1]);
+        $this->assertSame('*', $captured[1][3]);
+        $this->assertSame('8.2500', $captured[1][4]);
+    }
+
     public function testDryRunDoesNotImport(): void
     {
         $this->givenExistingRateCodes([]);

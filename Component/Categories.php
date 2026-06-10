@@ -168,6 +168,7 @@ class Categories implements ComponentInterface, ExportableComponentInterface
              * @var $category Category
              */
             $category = $this->category->create()->getCollection()
+                ->addAttributeToSelect('*')
                 ->addFieldToFilter('name', $categoryValues['name'])
                 ->addFieldToFilter('parent_id', $parentCategory->getId())
                 ->setPageSize(1)
@@ -184,17 +185,25 @@ class Categories implements ComponentInterface, ExportableComponentInterface
                 continue;
             }
 
+            // Per-entity diff: an existing category whose tracked fields already match
+            // the DB is left untouched. This avoids the no-op re-save that would
+            // otherwise regenerate URL rewrites and throw UrlAlreadyExistsException.
+            $unchanged = $exists && $this->isCategoryUnchanged($category, $categoryValues);
+
             $version = $categoryValues['version'] ?? null;
             $request = new ReconciliationRequest(
                 self::ALIAS,
                 $parentCategory->getId() . '_' . $categoryValues['name'],
                 $mode,
                 $exists,
-                $version ? (int) $version : null
+                $version ? (int) $version : null,
+                $exists ? $unchanged : null
             );
 
             if ($this->gate->decide($request)->isSkip()) {
-                $this->log->logComment(sprintf("Skip category '%s' modification in create mode: ", $categoryValues['name']));
+                $this->log->logComment(
+                    sprintf("Skip category '%s' modification (unchanged or create mode)", $categoryValues['name'])
+                );
                 $result->recordSkipped();
                 continue;
             }
@@ -278,6 +287,59 @@ class Categories implements ComponentInterface, ExportableComponentInterface
                 $this->createOrUpdateCategory($category, $categoryValues['categories'], $mode, $dryRun, $result);
             }
         }
+    }
+
+    /**
+     * Compare the source-tracked fields against the loaded category to decide
+     * whether anything would actually change. Mirrors the value resolution done
+     * by createOrUpdateCategory() but performs no side effects (no image copy,
+     * no save), so an unchanged category can be skipped entirely.
+     *
+     * Control keys (version, remove, categories) are ignored. When `is_active`
+     * is omitted from the source the writer defaults it to active, so the same
+     * default is asserted here.
+     *
+     * @param Category $category
+     * @param array $categoryValues
+     * @return bool
+     */
+    private function isCategoryUnchanged(Category $category, array $categoryValues): bool
+    {
+        foreach ($categoryValues as $attribute => $value) {
+            switch (true) {
+                case $attribute === 'version':
+                case $attribute === 'remove':
+                case $attribute === 'category':
+                case $attribute === 'categories':
+                    break;
+                case $attribute === 'image':
+                    // phpcs:ignore Magento2.Functions.DiscouragedFunction
+                    if (basename((string) $value) !== (string) $category->getData('image')) {
+                        return false;
+                    }
+                    break;
+                case $attribute === 'landing_page':
+                    $block = $this->blockFactory->create()->setStoreId($category->getStoreId());
+                    $this->blockResource->load($block, $value, 'identifier');
+                    if ($block->getIdentifier()
+                        && (string) $block->getId() !== (string) $category->getData('landing_page')
+                    ) {
+                        return false;
+                    }
+                    break;
+                default:
+                    if ((string) $category->getData($attribute) !== (string) $value) {
+                        return false;
+                    }
+            }
+        }
+
+        // The writer activates a category by default when `is_active` is unset.
+        if (!isset($categoryValues['is_active']) && (string) $category->getData('is_active') !== '1') {
+            return false;
+        }
+
+        return true;
     }
 
     /**

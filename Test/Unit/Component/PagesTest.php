@@ -190,6 +190,37 @@ class PagesTest extends TestCase
         $this->assertSame(0, $result->getCreated());
     }
 
+    public function testUnchangedDefaultPageDoesNotReassignStores(): void
+    {
+        // An existing default-scope page already assigned to store [0]. The store
+        // assignment must not be re-set, since doing so marked the model dirty and
+        // produced a phantom "Save page" on every run.
+        $this->givenPageLookup(55);
+
+        $page = $this->getMockBuilder(Page::class)
+            ->disableOriginalConstructor()
+            ->addMethods(['setStores'])
+            ->onlyMethods(['getData', 'getId', 'setData', 'setIdentifier', 'unsetData', 'hasDataChanges'])
+            ->getMock();
+        $data = ['title' => 'Same', 'page_layout' => 'empty', 'is_active' => '1', 'store_id' => ['0']];
+        $page->method('getData')->willReturnCallback(static fn (string $key = '') => $data[$key] ?? null);
+        $page->method('getId')->willReturn(55);
+        $page->method('setData')->willReturnSelf();
+        $page->method('unsetData')->willReturnSelf();
+        $page->method('hasDataChanges')->willReturn(false);
+        $this->pageRepository->method('getById')->with(55)->willReturn($page);
+
+        $page->expects($this->never())->method('setStores');
+        $this->pageRepository->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            'about-us' => ['page' => [['title' => 'Same']]],
+        ], false, null, ComponentMode::Maintain);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame(0, $result->getUpdated());
+    }
+
     public function testCreateModeVersionBumpForcesUpdate(): void
     {
         // Existing page + a newer declared version -> the gate forces an update even

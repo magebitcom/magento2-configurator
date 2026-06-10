@@ -176,6 +176,46 @@ class CategoriesTest extends TestCase
         $this->assertSame(1, $result->getUpdated());
     }
 
+    public function testMaintainModeSkipsUnchangedCategory(): void
+    {
+        $this->givenStoreGroup(1, 2);
+        $root = $this->givenRootCategory(2);
+
+        // An existing category whose tracked fields already match the source.
+        $existing = $this->createMock(Category::class);
+        $existing->method('getId')->willReturn(55);
+        $existing->method('getName')->willReturn('Shirts');
+        $existing->method('getStoreId')->willReturn(0);
+        $existing->method('getData')->willReturnCallback(
+            static fn (string $field) => [
+                'name' => 'Shirts',
+                'is_active' => '1',
+                'url_key' => 'shirts',
+            ][$field] ?? null
+        );
+        $this->givenChildLookupReturns($existing);
+
+        $this->categoryFactory->method('create')->willReturnOnConsecutiveCalls($root, $existing);
+
+        // Unchanged -> the gate skips and the resource model is never touched, so
+        // no URL rewrite regeneration can occur.
+        $this->categoryResource->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            'categories' => [
+                [
+                    'store_group' => 'Main Website Store',
+                    'categories' => [
+                        ['name' => 'Shirts', 'is_active' => '1', 'url_key' => 'shirts'],
+                    ],
+                ],
+            ],
+        ], false, ComponentMode::Maintain);
+
+        $this->assertSame(0, $result->getUpdated());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
     public function testDryRunDoesNotPersist(): void
     {
         $this->givenStoreGroup(1, 2);
@@ -520,6 +560,7 @@ class CategoriesTest extends TestCase
     private function givenChildLookupReturns(Category&MockObject $category): void
     {
         $collection = $this->createMock(CategoryCollection::class);
+        $collection->method('addAttributeToSelect')->willReturnSelf();
         $collection->method('addFieldToFilter')->willReturnSelf();
         $collection->method('setPageSize')->willReturnSelf();
         $collection->method('getFirstItem')->willReturn($category);

@@ -251,12 +251,24 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
         $existing = $rule->getCollection()->addFieldToFilter('code', $ruleData['code'])->getFirstItem();
         $exists = (bool) $existing->getId();
 
-        $request = new ReconciliationRequest(self::ALIAS, (string) $ruleData['code'], $context->getMode(), $exists);
+        // Per-entity diff: an existing rule whose rate/class ids and scalar fields
+        // already match the source is left untouched, so maintain mode no longer
+        // re-imports (re-saves) every rule on every run.
+        $unchanged = $exists && $this->isRuleUnchanged((int) $existing->getId(), $ruleData);
+
+        $request = new ReconciliationRequest(
+            self::ALIAS,
+            (string) $ruleData['code'],
+            $context->getMode(),
+            $exists,
+            null,
+            $exists ? $unchanged : null
+        );
 
         $outcome = $this->gate->decide($request);
         if ($outcome->isSkip()) {
             $this->log->logComment(
-                sprintf('Tax Rule "%s" exists, skipped (create mode).', $ruleData['code'])
+                sprintf('Tax Rule "%s" skipped (unchanged or create mode).', $ruleData['code'])
             );
             $result->recordSkipped();
 
@@ -286,6 +298,56 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
             sprintf('Tax Rule "%s" %s.', $ruleData['code'], $outcome->value)
         );
         $outcome->record($result);
+    }
+
+    /**
+     * Compare a fully-loaded tax rule against the formatted source data to decide
+     * whether a save would change anything. The collection item used for the
+     * existence check does not carry the rate/class id associations, so the rule
+     * is loaded in full here. Any failure to load is treated as "changed" so the
+     * save still runs.
+     *
+     * @param int $ruleId
+     * @param array $ruleData formatted source data (ids already resolved)
+     * @return bool
+     */
+    private function isRuleUnchanged(int $ruleId, array $ruleData): bool
+    {
+        $rule = $this->ruleFactory->create();
+        $this->taxRuleResource->load($rule, $ruleId);
+        if (!$rule->getId()) {
+            return false;
+        }
+
+        if ((int) $rule->getPriority() !== (int) $ruleData['priority']
+            || (int) $rule->getPosition() !== (int) $ruleData['position']
+            || (int) $rule->getCalculateSubtotal() !== (int) $ruleData['calculate_subtotal']
+        ) {
+            return false;
+        }
+
+        return $this->sameIdSet($rule->getTaxRateIds(), $ruleData['tax_rate_ids'])
+            && $this->sameIdSet($rule->getCustomerTaxClassIds(), $ruleData['customer_tax_class_ids'])
+            && $this->sameIdSet($rule->getProductTaxClassIds(), $ruleData['product_tax_class_ids']);
+    }
+
+    /**
+     * Order-insensitive comparison of two id lists, normalised to sorted ints.
+     *
+     * @param mixed $a
+     * @param mixed $b
+     * @return bool
+     */
+    private function sameIdSet(mixed $a, mixed $b): bool
+    {
+        $normalise = static function (mixed $ids): array {
+            $ids = array_map('intval', is_array($ids) ? $ids : []);
+            sort($ids);
+
+            return $ids;
+        };
+
+        return $normalise($a) === $normalise($b);
     }
 
     /**

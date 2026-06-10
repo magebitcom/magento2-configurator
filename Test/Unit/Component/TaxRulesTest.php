@@ -134,6 +134,42 @@ class TaxRulesTest extends TestCase
         $this->assertSame(1, $result->getUpdated());
     }
 
+    public function testMaintainModeSkipsUnchangedRule(): void
+    {
+        $this->givenRateLookupReturnsId(5);
+        $this->givenTaxClassLookupReturnsId(3);
+
+        // The existence lookup resolves to rule id 42 ...
+        $existing = $this->createMock(Rule::class);
+        $existing->method('getId')->willReturn(42);
+
+        $collection = $this->createMock(\Magento\Tax\Model\ResourceModel\Calculation\Rule\Collection::class);
+        $collection->method('addFieldToFilter')->willReturnSelf();
+        $collection->method('getFirstItem')->willReturn($existing);
+
+        // ... and the fully-loaded rule already matches the source row exactly.
+        $loaded = $this->createMock(Rule::class);
+        $loaded->method('getCollection')->willReturn($collection);
+        $loaded->method('getId')->willReturn(42);
+        $loaded->method('getTaxRateIds')->willReturn([5]);
+        $loaded->method('getCustomerTaxClassIds')->willReturn([3]);
+        $loaded->method('getProductTaxClassIds')->willReturn([3]);
+        $loaded->method('getPriority')->willReturn(0);
+        $loaded->method('getCalculateSubtotal')->willReturn(0);
+        $loaded->method('getPosition')->willReturn(1);
+
+        $this->ruleFactory->method('create')->willReturn($loaded);
+        $this->taxRuleResource->method('load')->willReturnSelf();
+
+        // Unchanged -> the gate skips and nothing is re-saved.
+        $this->taxRuleResource->expects($this->never())->method('save');
+
+        $result = $this->execute($this->sourceRows(), false, ComponentMode::Maintain);
+
+        $this->assertSame(0, $result->getUpdated());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
     public function testDryRunDoesNotPersist(): void
     {
         $this->givenRateLookupReturnsId(5);
