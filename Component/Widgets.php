@@ -128,6 +128,13 @@ class Widgets implements ComponentInterface, ExportableComponentInterface
                 return;
             }
 
+            if (!$isNew) {
+                // The collection item carries only the widget_instance columns; load the
+                // full instance so page_groups (stored in a separate table) are present
+                // for the diff below and are not dropped when the widget is saved.
+                $this->widgetResource->load($widget, (int) $widget->getId());
+            }
+
             foreach ($widgetData as $key => $value) {
                 // Skip the control key; it is not a widget field.
                 if ($key == "remove") {
@@ -152,7 +159,10 @@ class Widgets implements ComponentInterface, ExportableComponentInterface
                 }
 
                 if ($key == "page_groups" && is_array($value)) {
-                    $value = $this->buildPageGroups($value);
+                    if ($this->savePageGroups($widget, $value)) {
+                        $canSave = true;
+                    }
+                    continue;
                 }
 
                 if ($widget->getData($key) == $value) {
@@ -478,6 +488,70 @@ class Widgets implements ComponentInterface, ExportableComponentInterface
     }
 
     /**
+     * Reconcile a widget's page_groups against the source list. The built input
+     * form is always carried onto the model (so a save triggered by another field
+     * change does not drop the page_groups), but a change is only reported when the
+     * stored placement actually differs from the source.
+     *
+     * The comparison is done in the simplified source shape because the stored
+     * widget_instance_page rows use different column names (block_reference,
+     * page_for, page_template) and a synthetic row id, so the previous raw
+     * comparison against the built input form never matched and forced a re-save
+     * on every run.
+     *
+     * @param Instance $widget the (hydrated) widget instance
+     * @param array $sourceGroups the source `page_groups` list
+     * @return bool true when the placement changed and a save is required
+     */
+    private function savePageGroups(Instance $widget, array $sourceGroups): bool
+    {
+        $current = $this->comparablePageGroups($this->getPageGroups($widget->getData('page_groups')));
+        $desired = $this->comparablePageGroups($sourceGroups);
+
+        $widget->setData('page_groups', $this->buildPageGroups($sourceGroups));
+
+        if ($current === $desired) {
+            $this->log->logComment('Widget page_groups unchanged', 1);
+            return false;
+        }
+
+        $this->log->logInfo(sprintf('Widget page_groups = %s', print_r($sourceGroups, true)), 1);
+
+        return true;
+    }
+
+    /**
+     * Reduce a simplified page_groups list (as produced by getPageGroups(), or a
+     * source list) to a canonical, order-insensitive set of comparable rows. The
+     * synthetic page_id is intentionally excluded: stored rows carry the row's
+     * primary key there, not a semantic page id (which, for specific pages, is
+     * encoded in layout_handle and so is already compared).
+     *
+     * @param array $groups
+     * @return string[] sorted JSON rows
+     */
+    private function comparablePageGroups(array $groups): array
+    {
+        $rows = [];
+        foreach ($groups as $group) {
+            if (!is_array($group)) {
+                continue;
+            }
+            $rows[] = (string) json_encode([
+                'page_group' => (string) ($group['page_group'] ?? 'all_pages'),
+                'block' => (string) ($group['block'] ?? ''),
+                'layout_handle' => (string) ($group['layout_handle'] ?? 'default'),
+                'for' => (string) ($group['for'] ?? 'all'),
+                'template' => (string) ($group['template'] ?? ''),
+                'entities' => (string) ($group['entities'] ?? ''),
+            ]);
+        }
+        sort($rows);
+
+        return $rows;
+    }
+
+    /**
      * Export current widget instances into the source format. Refresh mode
      * rewrites only the widgets already tracked in the source file (matched by
      * instance_type + title); full mode dumps every widget instance, optionally
@@ -681,11 +755,11 @@ class Widgets implements ComponentInterface, ExportableComponentInterface
                 continue;
             }
             $built[] = [
-                'page_group' => (string) ($pageGroup['group'] ?? 'all_pages'),
+                'page_group' => (string) ($pageGroup['page_group'] ?? 'all_pages'),
                 'block' => (string) ($pageGroup['block_reference'] ?? ''),
                 'layout_handle' => (string) ($pageGroup['layout_handle'] ?? 'default'),
-                'for' => (string) ($pageGroup['for'] ?? 'all'),
-                'template' => (string) ($pageGroup['template'] ?? ''),
+                'for' => (string) ($pageGroup['page_for'] ?? 'all'),
+                'template' => (string) ($pageGroup['page_template'] ?? ''),
                 'page_id' => (string) ($pageGroup['page_id'] ?? '0'),
                 'entities' => (string) ($pageGroup['entities'] ?? ''),
             ];

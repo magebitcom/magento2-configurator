@@ -198,6 +198,81 @@ class WidgetsTest extends TestCase
         $this->assertSame(1, $result->getSkipped());
     }
 
+    public function testMaintainModeSkipsWidgetWithUnchangedPageGroups(): void
+    {
+        // The stored widget_instance_page row (block_reference/page_for/page_template
+        // columns + a synthetic page_id) matches the simplified source placement, so
+        // the widget must settle to a skip rather than re-save every run.
+        $existing = $this->givenExistingWidget('Magento\\Cms\\Block\\Widget\\Block', 'Promo');
+        $existing->method('getData')->willReturnCallback(
+            static fn (string $key) => match ($key) {
+                'instance_type' => 'Magento\\Cms\\Block\\Widget\\Block',
+                'title' => 'Promo',
+                'page_groups' => [[
+                    'page_group' => 'all_pages',
+                    'block_reference' => 'content',
+                    'layout_handle' => 'default',
+                    'page_for' => 'all',
+                    'page_template' => '',
+                    'entities' => '',
+                    'page_id' => '26',
+                ]],
+                default => null,
+            }
+        );
+
+        $this->widgetResource->expects($this->never())->method('save');
+
+        $result = $this->execute([
+            [
+                'instance_type' => 'Magento\\Cms\\Block\\Widget\\Block',
+                'title' => 'Promo',
+                'page_groups' => [
+                    ['page_group' => 'all_pages', 'block' => 'content', 'for' => 'all'],
+                ],
+            ],
+        ], false, ComponentMode::Maintain);
+
+        $this->assertSame(0, $result->getUpdated());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testMaintainModeUpdatesWidgetWithChangedPageGroups(): void
+    {
+        // The stored placement targets a different block than the source -> re-save.
+        $existing = $this->givenExistingWidget('Magento\\Cms\\Block\\Widget\\Block', 'Promo');
+        $existing->method('getData')->willReturnCallback(
+            static fn (string $key) => match ($key) {
+                'instance_type' => 'Magento\\Cms\\Block\\Widget\\Block',
+                'title' => 'Promo',
+                'page_groups' => [[
+                    'page_group' => 'all_pages',
+                    'block_reference' => 'sidebar',
+                    'layout_handle' => 'default',
+                    'page_for' => 'all',
+                    'page_template' => '',
+                    'entities' => '',
+                    'page_id' => '26',
+                ]],
+                default => null,
+            }
+        );
+        $existing->expects($this->atLeastOnce())->method('setData');
+        $this->widgetResource->expects($this->once())->method('save')->with($existing);
+
+        $result = $this->execute([
+            [
+                'instance_type' => 'Magento\\Cms\\Block\\Widget\\Block',
+                'title' => 'Promo',
+                'page_groups' => [
+                    ['page_group' => 'all_pages', 'block' => 'content', 'for' => 'all'],
+                ],
+            ],
+        ], false, ComponentMode::Maintain);
+
+        $this->assertSame(1, $result->getUpdated());
+    }
+
     public function testDryRunDoesNotPersist(): void
     {
         $this->givenWidgetCollection([]);
