@@ -206,6 +206,12 @@ class Attributes implements ComponentInterface, ExportableComponentInterface
 
         if ($this->gate->decide($request)->isSkip()) {
             $this->log->logComment(sprintf('No update for attribute %s (unchanged or create mode).', $attributeCode));
+            // An unchanged attribute already matches the declared version; persist it so
+            // a later manual edit isn't mistaken for a stale entity and overwritten. The
+            // create-mode-protection skip (the attribute differs) deliberately does not.
+            if ($this->attributeExists && !$this->updateAttribute) {
+                $this->gate->commitVersion($request, $dryRun);
+            }
             $result->recordSkipped();
             return;
         }

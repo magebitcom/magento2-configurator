@@ -244,7 +244,7 @@ class Config implements ComponentInterface, ExportableComponentInterface
         mixed $value = null,
         int $encrypted = 0,
         ComponentMode $mode = ComponentMode::Maintain,
-        ?string $version = null,
+        int|string|null $version = null,
         bool $dryRun = false,
         ?ComponentResult $result = null
     ): void {
@@ -253,17 +253,28 @@ class Config implements ComponentInterface, ExportableComponentInterface
             $scope = ScopeConfigInterface::SCOPE_TYPE_DEFAULT;
             $existingValue = $this->getSetConfigValue($path, $scope, 0);
 
+            // A stored "0"/""/null is still a real value: existence must test for the
+            // row, not the value's truthiness. Using (bool) here made a falsy value look
+            // unset, so the gate dropped create-mode protection and overwrote it.
+            $exists = $existingValue !== false;
+            $unchanged = $exists && $value == $existingValue;
+
             $request = new ReconciliationRequest(
                 self::ALIAS,
                 'global_' . $path,
                 $mode,
-                (bool) $existingValue,
+                $exists,
                 $version ? (int) $version : null,
-                $existingValue !== false && $value == $existingValue
+                $unchanged
             );
 
             if ($this->gate->decide($request)->isSkip()) {
                 $this->log->logComment(sprintf("Global Config Already Has Value: %s = %s", $path, $existingValue));
+                // An unchanged value already matches the declared version; persist it so
+                // a later manual edit isn't mistaken for a stale entity and overwritten.
+                if ($unchanged) {
+                    $this->gate->commitVersion($request, $dryRun);
+                }
                 $result?->recordSkipped();
                 return;
             }
@@ -298,7 +309,7 @@ class Config implements ComponentInterface, ExportableComponentInterface
         string $code,
         int $encrypted = 0,
         ComponentMode $mode = ComponentMode::Maintain,
-        ?string $version = null,
+        int|string|null $version = null,
         bool $dryRun = false,
         ?ComponentResult $result = null
     ): void {
@@ -318,13 +329,19 @@ class Config implements ComponentInterface, ExportableComponentInterface
             // Check existing value, skip if the same
             $existingValue = $this->getSetConfigValue($path, $scope, (int) $website->getId());
 
+            // A stored "0"/""/null is still a real value: existence must test for the
+            // row, not the value's truthiness. Using (bool) here made a falsy value look
+            // unset, so the gate dropped create-mode protection and overwrote it.
+            $exists = $existingValue !== false;
+            $unchanged = $exists && $value == $existingValue;
+
             $request = new ReconciliationRequest(
                 self::ALIAS,
                 'website_' . $website->getId() . '_' . $path,
                 $mode,
-                (bool) $existingValue,
+                $exists,
                 $version ? (int) $version : null,
-                $existingValue !== false && $value == $existingValue
+                $unchanged
             );
 
             if ($this->gate->decide($request)->isSkip()) {
@@ -332,6 +349,11 @@ class Config implements ComponentInterface, ExportableComponentInterface
                     sprintf("Website '%s' Config Already: %s = %s", $code, $path, $existingValue),
                     $logNest
                 );
+                // An unchanged value already matches the declared version; persist it so
+                // a later manual edit isn't mistaken for a stale entity and overwritten.
+                if ($unchanged) {
+                    $this->gate->commitVersion($request, $dryRun);
+                }
                 $result?->recordSkipped();
                 return;
             }
@@ -385,7 +407,7 @@ class Config implements ComponentInterface, ExportableComponentInterface
         string $code,
         int $encrypted = 0,
         ComponentMode $mode = ComponentMode::Maintain,
-        ?string $version = null,
+        int|string|null $version = null,
         bool $dryRun = false,
         ?ComponentResult $result = null
     ): void {
@@ -404,13 +426,19 @@ class Config implements ComponentInterface, ExportableComponentInterface
             // Check existing value, skip if the same
             $existingValue = $this->getSetConfigValue($path, $scope, (int) $storeView->getId());
 
+            // A stored "0"/""/null is still a real value: existence must test for the
+            // row, not the value's truthiness. Using (bool) here made a falsy value look
+            // unset, so the gate dropped create-mode protection and overwrote it.
+            $exists = $existingValue !== false;
+            $unchanged = $exists && $value == $existingValue;
+
             $request = new ReconciliationRequest(
                 self::ALIAS,
                 'store_' . $storeView->getId() . '_' . $path,
                 $mode,
-                (bool) $existingValue,
+                $exists,
                 $version ? (int) $version : null,
-                $existingValue !== false && $value == $existingValue
+                $unchanged
             );
 
             if ($this->gate->decide($request)->isSkip()) {
@@ -418,6 +446,11 @@ class Config implements ComponentInterface, ExportableComponentInterface
                     sprintf("Store '%s' Config Already: %s = %s", $code, $path, $existingValue),
                     $logNest
                 );
+                // An unchanged value already matches the declared version; persist it so
+                // a later manual edit isn't mistaken for a stale entity and overwritten.
+                if ($unchanged) {
+                    $this->gate->commitVersion($request, $dryRun);
+                }
                 $result?->recordSkipped();
                 return;
             }

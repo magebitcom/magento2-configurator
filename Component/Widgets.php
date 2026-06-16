@@ -180,6 +180,10 @@ class Widgets implements ComponentInterface, ExportableComponentInterface
             }
 
             if (!$canSave) {
+                // Unchanged existing widget: persist its version so a later manual edit
+                // isn't mistaken for a stale entity and overwritten. A new widget always
+                // has $canSave = true, and the create-mode-protection skip returned earlier.
+                $this->gate->commitVersion($request, $dryRun);
                 $result->recordSkipped();
                 return;
             }

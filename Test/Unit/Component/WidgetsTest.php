@@ -49,6 +49,7 @@ class WidgetsTest extends TestCase
     private BlockRepositoryInterface&MockObject $blockRepository;
     private SearchCriteriaBuilder&MockObject $criteriaBuilder;
     private WidgetInstanceResource&MockObject $widgetResource;
+    private VersionManagementInterface&MockObject $versionManagement;
     private Widgets $component;
 
     protected function setUp(): void
@@ -83,9 +84,9 @@ class WidgetsTest extends TestCase
         );
 
         // Real gate over a version store that always reports "not newer".
-        $versionManagement = $this->createMock(VersionManagementInterface::class);
-        $versionManagement->method('isNewVersion')->willReturn(false);
-        $gate = new ReconciliationGate($versionManagement, $this->log);
+        $this->versionManagement = $this->createMock(VersionManagementInterface::class);
+        $this->versionManagement->method('isNewVersion')->willReturn(false);
+        $gate = new ReconciliationGate($this->versionManagement, $this->log);
 
         $this->component = new Widgets(
             $this->widgetCollection,
@@ -191,6 +192,37 @@ class WidgetsTest extends TestCase
                 'instance_type' => 'Magento\\Banner\\Block\\Widget\\Banner',
                 'title' => 'Promo Banner',
                 'css_class' => 'same-css',
+            ],
+        ], false, ComponentMode::Maintain);
+
+        $this->assertSame(0, $result->getUpdated());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testCommitsVersionWhenSkippingUnchangedWidget(): void
+    {
+        // Regression: an unchanged widget must still have its version persisted, so a
+        // later manual edit isn't seen as a stale (version 0) entity and overwritten by
+        // demo YAML. The save is skipped (nothing changed), but the version is committed.
+        $existing = $this->givenExistingWidget('Magento\\Banner\\Block\\Widget\\Banner', 'Promo Banner');
+        $existing->method('getData')->willReturnCallback(
+            static fn (string $key): ?string => match ($key) {
+                'instance_type' => 'Magento\\Banner\\Block\\Widget\\Banner',
+                'title' => 'Promo Banner',
+                default => null,
+            }
+        );
+
+        $this->widgetResource->expects($this->never())->method('save');
+        $this->versionManagement->expects($this->once())
+            ->method('setVersion')
+            ->with('widgets_Magento\\Banner\\Block\\Widget\\Banner|Promo Banner', 1);
+
+        $result = $this->execute([
+            [
+                'instance_type' => 'Magento\\Banner\\Block\\Widget\\Banner',
+                'title' => 'Promo Banner',
+                'version' => 1,
             ],
         ], false, ComponentMode::Maintain);
 

@@ -133,6 +133,12 @@ class HyvaPages implements ComponentInterface, ExportableComponentInterface
         $outcome = $this->gate->decide($request);
         if ($outcome->isSkip()) {
             $this->log->logComment(sprintf('Hyvä page "%s" skipped (unchanged or create mode).', $identifier));
+            // An unchanged page already matches the declared version; persist it so a
+            // later manual edit isn't mistaken for a stale entity and overwritten. The
+            // create-mode-protection skip ($unchanged === false) deliberately does not.
+            if ($unchanged) {
+                $this->gate->commitVersion($request, $context->isDryRun());
+            }
             $result->recordSkipped();
             return;
         }

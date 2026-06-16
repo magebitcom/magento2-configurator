@@ -150,6 +150,10 @@ class HyvaBlocks implements ComponentInterface, ExportableComponentInterface
         $existing = $this->loadExisting($cmsBlockId);
         if ($existing !== false && $this->isUnchanged($existing, $content, $isLiveview)) {
             $this->log->logComment(sprintf('Hyvä block "%s" already up to date.', $identifier));
+            // Unchanged block: persist its version so a later manual edit isn't mistaken
+            // for a stale entity and overwritten. The create-mode-protection skip returned
+            // earlier, so this path is only reached for a genuinely unchanged block.
+            $this->gate->commitVersion($request, $dryRun);
             $result->recordSkipped();
             return;
         }
