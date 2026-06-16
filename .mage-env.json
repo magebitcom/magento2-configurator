@@ -1,0 +1,9 @@
+{
+  "hash_prefix": "cfg",
+  "mounts": [
+    {
+      "source": "./",
+      "target": "app/code/Magebit/Configurator"
+    }
+  ]
+}

@@ -42,6 +42,7 @@ class ConfigTest extends TestCase
     private StoreFactory&MockObject $storeFactory;
     private LoggerInterface&MockObject $log;
     private ConfigCollectionFactory&MockObject $configValueFactory;
+    private VersionManagementInterface&MockObject $versionManagement;
     private Config $component;
 
     protected function setUp(): void
@@ -72,9 +73,9 @@ class ConfigTest extends TestCase
         $this->initialConfig->method('getMetadata')->willReturn([]);
 
         // Real gate over a version store that always reports "not newer".
-        $versionManagement = $this->createMock(VersionManagementInterface::class);
-        $versionManagement->method('isNewVersion')->willReturn(false);
-        $gate = new ReconciliationGate($versionManagement, $this->log);
+        $this->versionManagement = $this->createMock(VersionManagementInterface::class);
+        $this->versionManagement->method('isNewVersion')->willReturn(false);
+        $gate = new ReconciliationGate($this->versionManagement, $this->log);
 
         $this->component = new Config(
             $this->configResource,
@@ -157,6 +158,64 @@ class ConfigTest extends TestCase
                 ['path' => 'general/store/name', 'value' => 'Acme'],
             ],
         ], false, ComponentMode::Maintain);
+
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testCreateModeProtectsExistingFalsyValue(): void
+    {
+        // Regression: a stored "0" is a real value. Existence must not be measured by
+        // the value's truthiness (the old `(bool) $existingValue` made "0" look unset,
+        // so create mode "created" over it instead of protecting the manual change).
+        $this->givenLookupCollection('0');
+
+        $this->configResource->expects($this->never())->method('saveConfig');
+
+        $result = $this->execute([
+            'global' => [
+                ['path' => 'checkout/options/enable_agreements', 'value' => '1'],
+            ],
+        ]);
+
+        $this->assertSame(0, $result->getCreated());
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testCommitsVersionWhenSkippingUnchangedValue(): void
+    {
+        // Regression: an unchanged value must still have its version persisted, so a
+        // later manual edit isn't seen as a stale (version 0) entity and overwritten.
+        // The save is skipped, but the version is committed.
+        $this->givenLookupCollection('Acme');
+
+        $this->configResource->expects($this->never())->method('saveConfig');
+        $this->versionManagement->expects($this->once())
+            ->method('setVersion')
+            ->with('config_global_general/store/name', 2);
+
+        $result = $this->execute([
+            'global' => [
+                ['path' => 'general/store/name', 'value' => 'Acme', 'version' => 2],
+            ],
+        ], false, ComponentMode::Maintain);
+
+        $this->assertSame(1, $result->getSkipped());
+    }
+
+    public function testDoesNotCommitVersionWhenProtectingChangedValueInCreateMode(): void
+    {
+        // The create-mode-protection skip (existing value differs, no version bump) must
+        // NOT bump the stored version: the YAML was deliberately not applied.
+        $this->givenLookupCollection('Old Name');
+
+        $this->configResource->expects($this->never())->method('saveConfig');
+        $this->versionManagement->expects($this->never())->method('setVersion');
+
+        $result = $this->execute([
+            'global' => [
+                ['path' => 'general/store/name', 'value' => 'New Name', 'version' => 2],
+            ],
+        ]);
 
         $this->assertSame(1, $result->getSkipped());
     }
@@ -426,9 +485,9 @@ class ConfigTest extends TestCase
      */
     private function rebuildComponent(): void
     {
-        $versionManagement = $this->createMock(VersionManagementInterface::class);
-        $versionManagement->method('isNewVersion')->willReturn(false);
-        $gate = new ReconciliationGate($versionManagement, $this->log);
+        $this->versionManagement = $this->createMock(VersionManagementInterface::class);
+        $this->versionManagement->method('isNewVersion')->willReturn(false);
+        $gate = new ReconciliationGate($this->versionManagement, $this->log);
 
         $this->component = new Config(
             $this->configResource,

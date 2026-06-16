@@ -204,6 +204,13 @@ class Categories implements ComponentInterface, ExportableComponentInterface
                 $this->log->logComment(
                     sprintf("Skip category '%s' modification (unchanged or create mode)", $categoryValues['name'])
                 );
+                // An unchanged category already matches the declared version; persist it
+                // so a later manual edit isn't mistaken for a stale entity and overwritten.
+                // The create-mode-protection skip ($unchanged === false) deliberately does
+                // not, since YAML was not applied.
+                if ($unchanged) {
+                    $this->gate->commitVersion($request, $dryRun);
+                }
                 $result->recordSkipped();
                 continue;
             }
