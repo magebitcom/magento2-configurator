@@ -1,7 +1,7 @@
 # Tiered Prices (`tiered_prices`)
 
-Imports advanced (tiered) prices from a CSV file via FireGento FastSimpleImport (the
-`advanced_pricing` import entity).
+Imports advanced (tiered) prices from a CSV file via Magento's native ImportExport
+framework (the `advanced_pricing` import entity).
 
 ## Source format
 
@@ -47,6 +47,7 @@ entity accepts is valid; the table lists those in the sample. Multi-value fields
 
 ## Notes / v2 changes
 
-- v2 wires the importer through `FireGento\FastSimpleImport\Model\ImporterFactory` and
-  adds **dry-run** support (rows are counted but not imported). The CSV contract above
-  is unchanged from v1.
+- v2 wires the importer through `Magebit\Configurator\Model\Import\ImporterFactory`
+  (an in-house MIT wrapper over Magento's native ImportExport, replacing the
+  GPL `firegento/fastsimpleimport`) and adds **dry-run** support (rows are counted
+  but not imported). The CSV contract above is unchanged from v1.

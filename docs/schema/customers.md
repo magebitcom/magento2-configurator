@@ -1,7 +1,8 @@
 # Customers (`customers`)
 
-Imports customers and their addresses from a CSV file via FireGento FastSimpleImport
-(the `customer_composite` import entity), then reindexes the customer grid.
+Imports customers and their addresses from a CSV file via Magento's native
+ImportExport framework (the `customer_composite` import entity), then reindexes
+the customer grid.
 
 ## Source format
 
@@ -50,8 +51,10 @@ component; everything else is optional and validated by Magento's importer.
 
 ## Notes / v2 changes
 
-- v2 wires the importer through `FireGento\FastSimpleImport\Model\ImporterFactory` and
-  resolves groups via `GroupRepositoryInterface` / `GroupManagementInterface`. The CSV
-  contract above is unchanged from v1.
+- v2 wires the importer through `Magebit\Configurator\Model\Import\ImporterFactory`
+  (an in-house MIT wrapper over Magento's native ImportExport, replacing the
+  GPL `firegento/fastsimpleimport`) and resolves groups via
+  `GroupRepositoryInterface` / `GroupManagementInterface`. The CSV contract above
+  is unchanged from v1.
 - Explicit **dry-run** support was added in v2 (`--dry-run`): the row count is reported
   but no data is written and no reindex occurs.

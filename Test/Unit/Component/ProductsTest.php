@@ -10,8 +10,8 @@ declare(strict_types=1);
 
 namespace Magebit\Configurator\Test\Unit\Component;
 
-use FireGento\FastSimpleImport\Model\Importer;
-use FireGento\FastSimpleImport\Model\ImporterFactory;
+use Magebit\Configurator\Model\Import\Importer;
+use Magebit\Configurator\Model\Import\ImporterFactory;
 use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Component\Product\AttributeOption;
@@ -101,7 +101,7 @@ class ProductsTest extends TestCase
     public function testImportsSimpleProductInMaintainMode(): void
     {
         // Maintain mode always re-imports (no SKU pre-diff), so a single valid
-        // row reaches FastSimpleImport's processImport().
+        // row reaches the importer's processImport().
         $this->givenNoExistingSkus();
         $importer = $this->givenImporterPassesThrough();
         $importer->expects($this->once())->method('processImport');
@@ -148,7 +148,7 @@ class ProductsTest extends TestCase
     public function testEmptySetGuardStopsBeforeImport(): void
     {
         // Every data row is malformed, so nothing survives preparation. The
-        // mandatory empty-set guard must stop before touching FastSimpleImport.
+        // mandatory empty-set guard must stop before touching the importer.
         $this->importerFactory->expects($this->never())->method('create');
         $this->validatorFactory->expects($this->never())->method('create');
 
@@ -295,7 +295,7 @@ class ProductsTest extends TestCase
         $importer = $this->createMock(Importer::class);
         $importer->method('setMultipleValueSeparator')->willReturnSelf();
         $importer->method('getLogTrace')->willReturn('');
-        $importer->method('getErrorMessages')->willReturn([]);
+        $importer->method('getErrorMessages')->willReturn('');
         $this->importerFactory->method('create')->willReturn($importer);
 
         $validator = $this->createMock(Validator::class);

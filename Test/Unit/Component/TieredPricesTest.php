@@ -10,8 +10,8 @@ declare(strict_types=1);
 
 namespace Magebit\Configurator\Test\Unit\Component;
 
-use FireGento\FastSimpleImport\Model\Importer;
-use FireGento\FastSimpleImport\Model\ImporterFactory;
+use Magebit\Configurator\Model\Import\Importer;
+use Magebit\Configurator\Model\Import\ImporterFactory;
 use Magebit\Configurator\Api\ComponentMode;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Component\Product\AttributeOption;
@@ -172,7 +172,7 @@ class TieredPricesTest extends TestCase
             ])
             ->getMock();
         $importer->method('getLogTrace')->willReturn('');
-        $importer->method('getErrorMessages')->willReturn([]);
+        $importer->method('getErrorMessages')->willReturn('');
 
         $this->importerFactory->method('create')->willReturn($importer);
 
