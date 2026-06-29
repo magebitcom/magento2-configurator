@@ -17,7 +17,7 @@ use Magento\Catalog\Model\ResourceModel\Product\CollectionFactory as ProductColl
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Component\Product\Image;
 use Magebit\Configurator\Component\Product\AttributeOption;
-use FireGento\FastSimpleImport\Model\ImporterFactory;
+use Magebit\Configurator\Model\Import\ImporterFactory;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Component\Product\ValidatorFactory;
 use Magebit\Configurator\Component\Product\Validator;
@@ -150,7 +150,7 @@ class Products implements ComponentInterface
                 $productArray = $this->setStock($productArray);
             }
             // Capture MSI source items (if any) and strip the column so
-            // FastSimpleImport doesn't choke on the unknown attribute.
+            // the importer doesn't choke on the unknown attribute.
             if (isset($productArray[self::MSI_SOURCES_COLUMN])) {
                 $msiSku = (string) ($productArray[self::SKU_COLUMN_HEADING] ?? '');
                 if ($msiSku !== '' && (string) $productArray[self::MSI_SOURCES_COLUMN] !== '') {
@@ -174,8 +174,8 @@ class Products implements ComponentInterface
         // Row-level reconciliation: in create mode, drop rows whose SKU already
         // exists so we don't re-import existing products. A component-level
         // version bump (the Processor already let us run past its source gate)
-        // forces a full re-import. Maintain always re-imports (FastSimpleImport
-        // is opaque, so we cannot cheaply diff individual attributes).
+        // forces a full re-import. Maintain always re-imports (the import
+        // framework is opaque, so we cannot cheaply diff individual attributes).
         if ($context->getMode() === ComponentMode::Create
             && $context->getVersion() === null
             && $productsArray !== []
@@ -203,8 +203,8 @@ class Products implements ComponentInterface
 
         if ($productsArray === []) {
             // Nothing survived preparation (e.g. configurable products whose
-            // associated simple products don't exist yet). FastSimpleImport's
-            // validation adapter cannot iterate an empty set, so stop here.
+            // associated simple products don't exist yet). The import source
+            // adapter cannot iterate an empty set, so stop here.
             $this->log->logInfo('No products to import after preparation; all rows were skipped.');
             $result->recordSkipped(count($this->skippedProducts));
             return $result;
@@ -224,7 +224,7 @@ class Products implements ComponentInterface
 
         if ($context->isDryRun()) {
             $this->log->logInfo(
-                sprintf('[dry-run] Would import %s product rows via FastSimpleImport.', count($validatedProducts))
+                sprintf('[dry-run] Would import %s product rows via the import framework.', count($validatedProducts))
             );
             if ($this->msiSourceItems !== []) {
                 $this->log->logInfo(

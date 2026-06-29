@@ -19,7 +19,10 @@ modernised, self-owned fork under the `Magebit\Configurator` namespace
 
 - **Magento Open Source / Adobe Commerce 2.4.7 – 2.4.9** (all currently non-EOL)
 - **PHP 8.1 – 8.5** (the union supported across those Magento versions)
-- `firegento/fastsimpleimport ^2.0`
+- Magento's bundled ImportExport modules (`Magento_ImportExport`,
+  `Magento_CatalogImportExport`, `Magento_CustomerImportExport`,
+  `Magento_AdvancedPricingImportExport`) — shipped with Magento Open Source,
+  used by the product / customer / tiered-price import components
 
 ## What's new in v2
 
@@ -56,7 +59,7 @@ modernised, self-owned fork under the `Magebit\Configurator` namespace
 2. Create `app/etc/master.yaml` (see [`Samples/master.yaml`](Samples/master.yaml)).
    Source paths are resolved relative to the Magento base dir, e.g.
    `app/etc/configurator/Attributes/attributes.yaml`.
-3. Enable the modules: `bin/magento module:enable Magebit_Configurator FireGento_FastSimpleImport`
+3. Enable the module: `bin/magento module:enable Magebit_Configurator`
    then `bin/magento setup:upgrade`.
 4. Apply: `bin/magento configurator:run --env="<environment>"`
 
@@ -181,7 +184,7 @@ the versioning levers** described above — the notes below only call out extras
 | Attributes | `attributes` | create/maintain, swatches |
 | Attribute Sets | `attribute_sets` | |
 | Categories | `categories` | create/maintain |
-| Products | `products` | FastSimpleImport; create mode skips existing SKUs (configurable products need their simple products to exist) |
+| Products | `products` | native Magento ImportExport; create mode skips existing SKUs (configurable products need their simple products to exist) |
 | Blocks | `blocks` | create/maintain, phtml templates, versioning |
 | Pages | `pages` | create/maintain, versioning |
 | API Integrations | `apiintegrations` | |
@@ -195,7 +198,7 @@ the versioning levers** described above — the notes below only call out extras
 | Review Ratings | `review_rating` | |
 | Product Links | `product_links` | related / up-sell / cross-sell |
 | Customer Attributes | `customer_attributes` | |
-| Customers | `customers` | FastSimpleImport; create mode skips existing emails |
+| Customers | `customers` | native Magento ImportExport; create mode skips existing emails |
 | SQL | `sql` | raw SQL files |
 | Catalog Price Rules | `catalog_price_rules` | |
 | Shipping Table Rates | `shippingtablerates` | gate via component-level `version:` (no per-row reconcile) |
@@ -203,7 +206,7 @@ the versioning levers** described above — the notes below only call out extras
 | Inventory Sources | `inventory_sources` | MSI sources/stocks/links + sales channels; run before `products` |
 | Hyvä CMS Pages | `hyva_pages` | optional — requires `Hyva_CmsMagento` (paid); no-ops without it |
 | Hyvä CMS Blocks | `hyva_blocks` | optional — requires `Hyva_CmsMagento` (paid); can auto-create the CMS block |
-| Tiered Prices | `tiered_prices` | FastSimpleImport |
+| Tiered Prices | `tiered_prices` | native Magento ImportExport |
 
 ## Background
 

@@ -42,5 +42,5 @@ non-zero when component errors occur.
 
 - **Configurable products** require their associated simple products to already
   exist. When none resolve, the configurable row is skipped (and logged) rather
-  than handed as an empty set to FastSimpleImport's validation adapter — this
+  than handed as an empty set to the import validation adapter — this
   fixes the earlier "Undefined array key 0" crash in `ArrayAdapter`.

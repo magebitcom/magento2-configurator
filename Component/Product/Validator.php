@@ -9,8 +9,8 @@
 namespace Magebit\Configurator\Component\Product;
 
 use Magebit\Configurator\Component\Products;
-use Firegento\FastSimpleImport\Model\Importer;
-use FireGento\FastSimpleImport\Model\Adapters\ImportAdapterFactoryInterface;
+use Magebit\Configurator\Model\Import\Importer;
+use Magebit\Configurator\Model\Import\Source\ArrayAdapterFactory;
 
 class Validator
 {
@@ -35,7 +35,7 @@ class Validator
     const IMPORT_DATA_ACTION_NULLIFY = 'nullify';
 
     /**
-     * @var ImportAdapterFactoryInterface
+     * @var ArrayAdapterFactory
      */
     private $importAdapterFactory;
 
@@ -48,10 +48,10 @@ class Validator
 
     /**
      * Validator constructor.
-     * @param ImportAdapterFactoryInterface $importAdapterFactory
+     * @param ArrayAdapterFactory $importAdapterFactory
      */
     public function __construct(
-        ImportAdapterFactoryInterface $importAdapterFactory
+        ArrayAdapterFactory $importAdapterFactory
     ) {
         $this->importAdapterFactory = $importAdapterFactory;
     }
@@ -130,9 +130,8 @@ class Validator
     public function getImportRowFailures(Importer $import, $importLines)
     {
         $failedRows = [];
-        // Creates a validation model and runs the import data through so we can find which rows would fail
-        // FastSimpleImport >=2.x exposes the import model via getImportModel()
-        // (the older createImportModel() was removed).
+        // Creates a validation model and runs the import data through so we can find which rows would fail.
+        // The importer exposes the underlying Magento import model via getImportModel().
         $validation = $import->getImportModel();
         $validationSource = $this->importAdapterFactory->create([
             'data' => $importLines,

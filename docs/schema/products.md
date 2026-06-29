@@ -1,8 +1,8 @@
 # Products (`products`)
 
-Imports products from a CSV file using FireGento FastSimpleImport (which wraps
-Magento's native CSV product import). One row per product; the first row is the
-header that names the attribute for each column.
+Imports products from a CSV file through Magento's native ImportExport framework
+(the rows are fed in as an array rather than a CSV on disk). One row per product;
+the first row is the header that names the attribute for each column.
 
 ## Source format
 
@@ -44,7 +44,7 @@ below have special handling or meaning in the component.
 | `image`, `small_image`, `thumbnail`, `media_image`, `additional_images` | no | string | Image columns. Values are run through the image handler (downloads/copies and rewrites the value); multiple images use `;`. |
 | `qty` | no | number | Stock quantity. If `is_in_stock` is set without `qty`, `qty` defaults to `1`. |
 | `is_in_stock` | no | int | `1`/`0`. If both `qty` and `is_in_stock` are absent, default stock is applied. |
-| `msi_sources` | no | string | Multi-source-inventory source items: `source_code=qty[:status]` entries joined by `;` (e.g. `default=100;warehouse_b=50:0`); status `1`=in stock (default), `0`=out. Applied via the Inventory API after import for the imported SKUs; the column is stripped before FastSimpleImport. |
+| `msi_sources` | no | string | Multi-source-inventory source items: `source_code=qty[:status]` entries joined by `;` (e.g. `default=100;warehouse_b=50:0`); status `1`=in stock (default), `0`=out. Applied via the Inventory API after import for the imported SKUs; the column is stripped before the import. |
 | `associated_products` | configurable only | list | Comma-separated child SKUs. Used to build `configurable_variations`; dropped from the final row. |
 | `configurable_attributes` | configurable only | list | Comma-separated attribute codes that vary across the children (e.g. `color`). Used to build `configurable_variations`; dropped from the final row. |
 | `color` (and other attribute columns) | no | mixed | Any other header maps directly to that product attribute. Select/multiselect option labels are auto-created via the attribute-option handler. |
@@ -58,10 +58,10 @@ configurable row is skipped.
 
 ## Behaviour
 
-- **Bulk import via FastSimpleImport.** Rows are assembled into an array and handed to
-  `FireGento\FastSimpleImport` (`processImport`) with `;` as the multiple-value
-  separator. Create vs. update is decided by Magento's native importer (matched by
-  `sku`), not by this component, so it is effectively upsert.
+- **Bulk import via Magento ImportExport.** Rows are assembled into an array and handed to
+  `Magebit\Configurator\Model\Import\Importer` (`processImport`) with `;` as the
+  multiple-value separator. Create vs. update is decided by Magento's native importer
+  (matched by `sku`), not by this component, so it is effectively upsert.
 - **Validation pass.** Before importing, the rows are run through a validator; rows
   that fail validation are removed and the count is logged (`Removed N products after
   validation`).
@@ -71,7 +71,7 @@ configurable row is skipped.
 - **Mode.** This component does not branch on create/maintain mode itself; it always
   submits the assembled rows to the importer.
 - **Dry-run.** Validates and logs `[dry-run] Would import N product rows via
-  FastSimpleImport.` but does **not** call `processImport` — no products are written.
+  the import framework.` but does **not** call `processImport` — no products are written.
 - **Error handling.** Empty input (`data[0]` missing) records an error and returns.
   Exceptions thrown by the importer are caught and logged; the importer's own log
   trace and error messages are written to the log afterwards.

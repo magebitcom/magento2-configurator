@@ -16,7 +16,7 @@ use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
-use FireGento\FastSimpleImport\Model\ImporterFactory;
+use Magebit\Configurator\Model\Import\ImporterFactory;
 use Magento\Customer\Api\GroupManagementInterface;
 use Magento\Customer\Api\GroupRepositoryInterface;
 use Magento\Customer\Model\ResourceModel\Customer\CollectionFactory as CustomerCollectionFactory;
@@ -153,7 +153,7 @@ class Customers implements ComponentInterface
 
         try {
             /**
-             * @var \FireGento\FastSimpleImport\Model\Importer $importer
+             * @var \Magebit\Configurator\Model\Import\Importer $importer
              */
             $importer = $this->importerFactory->create();
             $importer->setEntityCode('customer_composite');

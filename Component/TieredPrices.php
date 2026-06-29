@@ -15,7 +15,7 @@ use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Component\Product\AttributeOption;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
-use FireGento\FastSimpleImport\Model\ImporterFactory;
+use Magebit\Configurator\Model\Import\ImporterFactory;
 
 /**
  * @SuppressWarnings(PHPMD.CouplingBetweenObjects)

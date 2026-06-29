@@ -11,7 +11,7 @@ namespace Magebit\Configurator\Component\Product;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magento\Framework\Filesystem;
 use Magento\Framework\App\Filesystem\DirectoryList;
-use FireGento\FastSimpleImport\Model\Config;
+use Magebit\Configurator\Model\Import\Config;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientFactory;
 use GuzzleHttp\Exception\GuzzleException;
