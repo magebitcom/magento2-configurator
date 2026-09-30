@@ -101,6 +101,39 @@ class BlocksTest extends TestCase
         $this->assertSame(0, $result->getUpdated());
     }
 
+    public function testStoreScopedBlockSavesWithItsOwnStoreIds(): void
+    {
+        // BlockRepository::save() fills an empty store_id with the current store,
+        // and the uniqueness check reads store_id: a store-scoped block must carry
+        // its own store ids there, or it collides with a same-identifier block
+        // assigned to the current store.
+        $collection = $this->givenCollection([]);
+        $newBlock = $this->givenBlockMock();
+        $this->blockFactory->method('create')->willReturnOnConsecutiveCalls(
+            $this->givenCollectionSource($collection),
+            $newBlock
+        );
+        $this->storeManager->method('load')->willReturnSelf();
+        $this->storeManager->method('getId')->willReturn(2);
+
+        $storeIds = [];
+        $newBlock->method('setStoreId')->willReturnCallback(
+            function ($value) use (&$storeIds, $newBlock) {
+                $storeIds[] = $value;
+                return $newBlock;
+            }
+        );
+        $newBlock->expects($this->once())->method('setStores')->with([2]);
+        $this->blockRepository->expects($this->once())->method('save')->with($newBlock);
+
+        $result = $this->execute([
+            'footer-copyright' => ['block' => [['title' => 'Label', 'stores' => ['label_default']]]],
+        ]);
+
+        $this->assertTrue($result->isSuccessful());
+        $this->assertSame([2], end($storeIds));
+    }
+
     public function testCreateModeProtectsExistingBlock(): void
     {
         // One existing block, no stores -> getBlockToProcess returns it. Create
@@ -426,7 +459,6 @@ class BlocksTest extends TestCase
         $block->method('getId')->willReturn(1);
         $block->method('setData')->willReturnSelf();
         $block->method('setIdentifier')->willReturnSelf();
-        $block->method('setStoreId')->willReturnSelf();
         $block->method('unsetData')->willReturnSelf();
         $block->method('setStores')->willReturnSelf();
 

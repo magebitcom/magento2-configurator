@@ -236,6 +236,9 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
                     foreach ($data['stores'] as $code) {
                         $stores[] = $this->getStoreByCode($code)->getId();
                     }
+                    // BlockRepository falls back to the current store when store_id is empty,
+                    // so the uniqueness check would run against the wrong store.
+                    $block->setStoreId($stores);
                     $block->setStores($stores);
                 }
 
