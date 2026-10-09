@@ -228,16 +228,20 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
 
                 // Process stores
                 // @todo compare stores to see if a save is required
-                $block->setStoreId(0);
+                // store_id must always carry the target stores: BlockRepository::save() replaces an empty
+                // store_id (including 0) with the current store, which is the default store view on the CLI.
+                // That moved "All Store Views" blocks to the default store view, and failed the identifier
+                // uniqueness check for a per-store block when the default store view has its own copy.
+                $storeIds = [Store::DEFAULT_STORE_ID];
                 if (isset($data['stores'])) {
-                    $block->unsetData('store_id');
-                    $block->unsetData('store_data');
-                    $stores = [];
+                    $storeIds = [];
                     foreach ($data['stores'] as $code) {
-                        $stores[] = $this->getStoreByCode($code)->getId();
+                        $storeIds[] = (int) $this->getStoreByCode($code)->getId();
                     }
-                    $block->setStores($stores);
                 }
+                $block->unsetData('store_data');
+                $block->setStores($storeIds);
+                $block->setStoreId($storeIds);
 
                 // If we can save the block
                 if ($canSave) {

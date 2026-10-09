@@ -141,6 +141,41 @@ class BlocksTest extends TestCase
         $this->assertSame(1, $result->getUpdated());
     }
 
+    public function testSaveKeepsThePerStoreBlockOnItsOwnStores(): void
+    {
+        // BlockRepository::save() replaces an empty store_id with the current (default) store view, so
+        // the block's own stores must be in store_id, not only in `stores`.
+        $existing = $this->givenBlockMock(['title' => 'Old']);
+        $collection = $this->givenCollection([$existing]);
+        $this->blockFactory->method('create')->willReturn($this->givenCollectionSource($collection));
+        $store = $this->createMock(Store::class);
+        $store->method('getId')->willReturn(5);
+        $this->storeManager->method('load')->with('be', 'code')->willReturn($store);
+
+        $existing->expects($this->once())->method('setStores')->with([5]);
+        $existing->expects($this->once())->method('setStoreId')->with([5]);
+        $this->blockRepository->expects($this->once())->method('save')->with($existing);
+
+        $this->execute([
+            'my-block' => ['block' => [['title' => 'New title', 'stores' => ['be']]]],
+        ], false, ComponentMode::Maintain);
+    }
+
+    public function testSaveKeepsADefaultScopeBlockOnAllStoreViews(): void
+    {
+        $existing = $this->givenBlockMock(['title' => 'Old']);
+        $collection = $this->givenCollection([$existing]);
+        $this->blockFactory->method('create')->willReturn($this->givenCollectionSource($collection));
+
+        $existing->expects($this->once())->method('setStores')->with([Store::DEFAULT_STORE_ID]);
+        $existing->expects($this->once())->method('setStoreId')->with([Store::DEFAULT_STORE_ID]);
+        $this->blockRepository->expects($this->once())->method('save')->with($existing);
+
+        $this->execute([
+            'my-block' => ['block' => [['title' => 'New title']]],
+        ], false, ComponentMode::Maintain);
+    }
+
     public function testMaintainModeSkipsUnchangedBlock(): void
     {
         // Existing block already matching the config -> no field differs -> no save,
