@@ -367,6 +367,21 @@ class Websites implements ComponentInterface, ExportableComponentInterface
                 $canSave = true;
             }
 
+            // Store::setGroup() sets the group only; the website comes from the group, as the admin
+            // controller does it, or the store view lands on website 0.
+            if ($storeView->getWebsiteId() != $storeGroup->getWebsiteId()) {
+                $this->log->logInfo(
+                    sprintf(
+                        "Setting website for store view '%s' from '%s' to '%s'",
+                        $code,
+                        $storeView->getWebsiteId(),
+                        $storeGroup->getWebsiteId()
+                    )
+                );
+                $storeView->setWebsiteId($storeGroup->getWebsiteId());
+                $canSave = true;
+            }
+
             // Loop through other store view data attributes
             foreach ($storeView->getData() as $key => $value) {
                 // Check if the data from the source has the data and that is different to that in magento
@@ -393,8 +408,9 @@ class Websites implements ComponentInterface, ExportableComponentInterface
                     $this->log->logInfo(sprintf("[dry-run] Would save store view '%s'", $code), $logNest);
                 } else {
                     // Save the store view
+                    // Store::afterSave() dispatches store_add for a new store itself; a second dispatch
+                    // makes the search engine create the store's indices twice within one second.
                     $storeView->getResource()->save($storeView);
-                    $this->eventManager->dispatch('store_add', ['store' => $storeView]);
                     $this->log->logInfo(sprintf("Saved store view '%s'", $code), $logNest);
                 }
                 $isNew ? $result->recordCreated() : $result->recordUpdated();
