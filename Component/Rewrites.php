@@ -20,6 +20,7 @@ use Magebit\Configurator\Model\ComponentResult;
 use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
+use Magento\UrlRewrite\Controller\Adminhtml\Url\Rewrite as UrlRewriteController;
 use Magento\UrlRewrite\Model\UrlRewriteFactory;
 use Magento\UrlRewrite\Model\UrlPersistInterface;
 use Magento\UrlRewrite\Model\ResourceModel\UrlRewrite as UrlRewriteResource;
@@ -152,12 +153,11 @@ class Rewrites implements ComponentInterface, ExportableComponentInterface
         $collection = $rewrite->getCollection()
             ->addFieldToFilter(self::REQUEST_PATH_KEY, $rewriteArray[self::REQUEST_PATH_CSV_KEY])
             ->addFieldToFilter('store_id', $rewriteArray[self::STORE_ID_CSV_KEY]);
-        $rewriteCount = $collection->getSize();
+        $existing = $collection->getSize() > 0 ? $collection->getFirstItem() : null;
 
         // Explicit removal: a `remove: true` row deletes the rewrite if it exists,
         // in either mode. Idempotent — a rewrite already absent is skipped.
         if (!empty($rewriteArray[self::REMOVE_CSV_KEY])) {
-            $existing = $rewriteCount > 0 ? $collection->getFirstItem() : null;
             $this->removeRewrite(
                 $rewriteArray[self::REQUEST_PATH_CSV_KEY],
                 $existing,
@@ -175,8 +175,9 @@ class Rewrites implements ComponentInterface, ExportableComponentInterface
             self::ALIAS,
             $rewriteArray[self::REQUEST_PATH_CSV_KEY] . '_' . $rewriteArray[self::STORE_ID_CSV_KEY],
             $mode,
-            $rewriteCount > 0,
-            $version
+            $existing !== null,
+            $version,
+            $this->isUnchanged($existing, $rewriteArray)
         );
 
         if ($this->gate->decide($request)->isSkip()) {
@@ -187,12 +188,8 @@ class Rewrites implements ComponentInterface, ExportableComponentInterface
             return;
         }
 
-        if ($rewriteCount > 0) {
-            $rewrite = $rewrite->getCollection()
-                ->addFieldToFilter(self::REQUEST_PATH_KEY, $rewriteArray[self::REQUEST_PATH_CSV_KEY])
-                ->addFieldToFilter('store_id', $rewriteArray[self::STORE_ID_CSV_KEY])
-                ->getFirstItem();
-
+        if ($existing !== null) {
+            $rewrite = $existing;
             $successMessage = 'URL Rewrite: "%s" already exists, rewrite updated';
             $isUpdate = true;
         }
@@ -216,6 +213,7 @@ class Rewrites implements ComponentInterface, ExportableComponentInterface
             ->setTargetPath($rewriteArray[self::TARGET_PATH_CSV_KEY])
             ->setRedirectType($rewriteArray[self::REDIRECT_TYPE_CSV_KEY]) //301 or 302
             ->setDescription($rewriteArray[self::DESCRIPTION_CSV_KEY]);
+        $this->ensureEntityType($rewrite);
         $this->urlRewriteResource->save($rewrite);
 
         $this->log->logInfo(
@@ -224,6 +222,43 @@ class Rewrites implements ComponentInterface, ExportableComponentInterface
 
         $isUpdate ? $result->recordUpdated() : $result->recordCreated();
         $this->gate->commitVersion($request, false);
+    }
+
+    /**
+     * Whether the stored rewrite already matches the CSV row.
+     *
+     * Null when there is no stored rewrite. A rewrite without an entity type is never
+     * unchanged so it is saved once to receive one.
+     *
+     * @param \Magento\UrlRewrite\Model\UrlRewrite|null $rewrite
+     * @param array $rewriteArray
+     * @return bool|null
+     */
+    private function isUnchanged($rewrite, array $rewriteArray): ?bool
+    {
+        if ($rewrite === null) {
+            return null;
+        }
+
+        return (bool) $rewrite->getEntityType()
+            && (string) $rewrite->getTargetPath() === (string) $rewriteArray[self::TARGET_PATH_CSV_KEY]
+            && (string) $rewrite->getRedirectType() === (string) $rewriteArray[self::REDIRECT_TYPE_CSV_KEY]
+            && (string) $rewrite->getDescription() === (string) $rewriteArray[self::DESCRIPTION_CSV_KEY];
+    }
+
+    /**
+     * Give a rewrite without an entity type the custom type.
+     *
+     * Entity types set by Magento (product, category, cms-page) are left alone.
+     *
+     * @param \Magento\UrlRewrite\Model\UrlRewrite $rewrite
+     * @return void
+     */
+    private function ensureEntityType($rewrite): void
+    {
+        if (!$rewrite->getEntityType()) {
+            $rewrite->setEntityType(UrlRewriteController::ENTITY_TYPE_CUSTOM);
+        }
     }
 
     /**
