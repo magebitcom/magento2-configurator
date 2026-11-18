@@ -30,6 +30,8 @@ use Magento\Framework\Exception\LocalizedException;
 use Magento\Store\Model\StoreFactory;
 use Magento\Store\Model\WebsiteFactory;
 use Magento\Theme\Model\ResourceModel\Theme\CollectionFactory;
+use Magento\Store\Model\ResourceModel\Website as WebsiteResource;
+use Magento\Store\Model\ResourceModel\Store as StoreResource;
 
 class Config implements ComponentInterface, ExportableComponentInterface
 {
@@ -49,7 +51,9 @@ class Config implements ComponentInterface, ExportableComponentInterface
         protected readonly StoreFactory $storeFactory,
         private readonly LoggerInterface $log,
         private readonly ReconciliationGate $gate,
-        private readonly ConfigCollectionFactory $configValueFactory
+        private readonly ConfigCollectionFactory $configValueFactory,
+        private readonly WebsiteResource $websiteResource,
+        private readonly StoreResource $storeResource
     ) {
     }
 
@@ -319,7 +323,7 @@ class Config implements ComponentInterface, ExportableComponentInterface
 
             // Prepare Website ID;
             $website = $this->websiteFactory->create();
-            $website->load($code, 'code');
+            $this->websiteResource->load($website, $code, 'code');
             if (!$website->getId()) {
                 throw new ComponentException(
                     (string) __("There is no website with the code '%1'", $code)
@@ -416,7 +420,7 @@ class Config implements ComponentInterface, ExportableComponentInterface
             $scope = 'stores';
 
             $storeView = $this->storeFactory->create();
-            $storeView->load($code, 'code');
+            $this->storeResource->load($storeView, $code, 'code');
             if (!$storeView->getId()) {
                 throw new ComponentException(
                     (string) __("There is no store view with the code '%1'", $code)
@@ -699,24 +703,26 @@ class Config implements ComponentInterface, ExportableComponentInterface
     {
         if ($scope === 'websites') {
             $website = $this->websiteFactory->create();
-            $website->load($code, 'code');
+            $this->websiteResource->load($website, $code, 'code');
             return $website->getId() ? (int) $website->getId() : null;
         }
 
         $store = $this->storeFactory->create();
-        $store->load($code, 'code');
+        $this->storeResource->load($store, $code, 'code');
         return $store->getId() ? (int) $store->getId() : null;
     }
 
     private function websiteCodeById(int $scopeId): ?string
     {
-        $website = $this->websiteFactory->create()->load($scopeId);
+        $website = $this->websiteFactory->create();
+        $this->websiteResource->load($website, $scopeId);
         return $website->getId() ? (string) $website->getCode() : null;
     }
 
     private function storeCodeById(int $scopeId): ?string
     {
-        $store = $this->storeFactory->create()->load($scopeId);
+        $store = $this->storeFactory->create();
+        $this->storeResource->load($store, $scopeId);
         return $store->getId() ? (string) $store->getCode() : null;
     }
 

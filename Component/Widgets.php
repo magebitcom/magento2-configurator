@@ -32,6 +32,7 @@ use Magento\Widget\Model\ResourceModel\Widget\Instance as WidgetInstanceResource
 use Magento\Widget\Model\ResourceModel\Widget\Instance\Collection as WidgetCollection;
 use Magento\Widget\Model\Widget\Instance;
 use Magento\Widget\Model\Widget\InstanceFactory as WidgetInstanceFactory;
+use Magento\Store\Model\ResourceModel\Store as StoreResource;
 
 class Widgets implements ComponentInterface, ExportableComponentInterface
 {
@@ -49,7 +50,8 @@ class Widgets implements ComponentInterface, ExportableComponentInterface
         private readonly BlockRepositoryInterface $blockRepository,
         private readonly SearchCriteriaBuilder $criteriaBuilder,
         private readonly WidgetInstanceResource $widgetResource,
-        private readonly ReconciliationGate $gate
+        private readonly ReconciliationGate $gate,
+        private readonly StoreResource $storeResource
     ) {
     }
 
@@ -255,7 +257,7 @@ class Widgets implements ComponentInterface, ExportableComponentInterface
     public function getWidgetByInstanceTypeAndTitle($widgetInstanceType, $widgetTitle): ?DataObject
     {
         // Clear any existing filters applied to the widget collection
-        $this->widgetCollection->getSelect()->reset(\Zend_Db_Select::WHERE);
+        $this->widgetCollection->getSelect()->reset(\Magento\Framework\DB\Select::WHERE);
         $this->widgetCollection->removeAllItems();
 
         // Filter widget collection
@@ -447,7 +449,7 @@ class Widgets implements ComponentInterface, ExportableComponentInterface
         $storeIds = [];
         foreach ($stores as $code) {
             $storeView = $this->storeFactory->create();
-            $storeView->load($code, 'code');
+            $this->storeResource->load($storeView, $code, 'code');
             if (!$storeView->getId()) {
                 throw new ComponentException(
                     (string) __('Cannot find store with code %1', $code)
@@ -710,7 +712,7 @@ class Widgets implements ComponentInterface, ExportableComponentInterface
                 continue;
             }
             $store = $this->storeFactory->create();
-            $store->load((int) $storeId);
+            $this->storeResource->load($store, (int) $storeId);
             if ($store->getId()) {
                 $codes[] = (string) $store->getCode();
             }

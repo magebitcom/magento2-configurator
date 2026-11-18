@@ -322,10 +322,9 @@ class CustomersTest extends TestCase
     {
         $customers = [];
         foreach ($existingEmails as $email) {
-            $customer = $this->getMockBuilder(Customer::class)
+            $customer = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\CustomerStub::class)
                 ->disableOriginalConstructor()
-                ->addMethods(['getEmail'])
-                ->getMock();
+                ->onlyMethods(['getEmail'])->getMock();
             $customer->method('getEmail')->willReturn($email);
             $customers[] = $customer;
         }

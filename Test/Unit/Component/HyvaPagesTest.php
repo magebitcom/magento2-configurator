@@ -31,6 +31,7 @@ use PHPUnit\Framework\TestCase;
 
 class HyvaPagesTest extends TestCase
 {
+    private \Magento\Cms\Model\ResourceModel\Page $pageResource;
     private const HYVA_MODULE = 'Hyva_CmsMagento';
 
     private CmsPageFactory&MockObject $cmsPageFactory;
@@ -44,6 +45,7 @@ class HyvaPagesTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->pageResource = $this->createMock(\Magento\Cms\Model\ResourceModel\Page::class);
         $this->cmsPageFactory = $this->getMockBuilder(CmsPageFactory::class)
             ->disableOriginalConstructor()
             ->onlyMethods(['create'])
@@ -59,7 +61,7 @@ class HyvaPagesTest extends TestCase
         // helper method needs stubbing on the adapter.
         $this->connection = $this->getMockBuilder(AdapterInterface::class)
             ->disableOriginalConstructor()
-            ->getMockForAbstractClass();
+            ->getMock();
         $select = $this->createMock(Select::class);
         $select->method('from')->willReturnSelf();
         $select->method('join')->willReturnSelf();
@@ -82,7 +84,8 @@ class HyvaPagesTest extends TestCase
             $this->moduleManager,
             $this->log,
             $gate,
-            $this->objectManager
+            $this->objectManager,
+            pageResource: $this->pageResource
         );
     }
 

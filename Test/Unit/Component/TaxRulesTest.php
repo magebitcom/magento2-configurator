@@ -31,6 +31,10 @@ use PHPUnit\Framework\TestCase;
 
 class TaxRulesTest extends TestCase
 {
+    private \Magento\Tax\Model\ResourceModel\Calculation\Rate $rateResource;
+    private \Magento\Tax\Model\ResourceModel\Calculation\Rule\CollectionFactory $ruleCollectionFactory;
+    private \Magento\Tax\Model\ResourceModel\TaxClass\CollectionFactory $classModelCollectionFactory;
+    private \Magento\Tax\Model\ResourceModel\Calculation\Rate\CollectionFactory $rateCollectionFactory;
     private RateFactory&MockObject $rateFactory;
     private ClassModelFactory&MockObject $classModelFactory;
     private RuleFactory&MockObject $ruleFactory;
@@ -41,6 +45,10 @@ class TaxRulesTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->rateResource = $this->createMock(\Magento\Tax\Model\ResourceModel\Calculation\Rate::class);
+        $this->ruleCollectionFactory = $this->createMock(\Magento\Tax\Model\ResourceModel\Calculation\Rule\CollectionFactory::class);
+        $this->classModelCollectionFactory = $this->createMock(\Magento\Tax\Model\ResourceModel\TaxClass\CollectionFactory::class);
+        $this->rateCollectionFactory = $this->createMock(\Magento\Tax\Model\ResourceModel\Calculation\Rate\CollectionFactory::class);
         $this->rateFactory = $this->getMockBuilder(RateFactory::class)
             ->disableOriginalConstructor()
             ->onlyMethods(['create'])
@@ -68,7 +76,11 @@ class TaxRulesTest extends TestCase
             $this->taxRuleResource,
             $this->taxClassResource,
             $this->log,
-            $gate
+            $gate,
+            rateCollectionFactory: $this->rateCollectionFactory,
+            classModelCollectionFactory: $this->classModelCollectionFactory,
+            ruleCollectionFactory: $this->ruleCollectionFactory,
+            rateResource: $this->rateResource
         );
     }
 
@@ -149,7 +161,7 @@ class TaxRulesTest extends TestCase
 
         // ... and the fully-loaded rule already matches the source row exactly.
         $loaded = $this->createMock(Rule::class);
-        $loaded->method('getCollection')->willReturn($collection);
+        $this->ruleCollectionFactory->method('create')->willReturn($collection);
         $loaded->method('getId')->willReturn(42);
         $loaded->method('getTaxRateIds')->willReturn([5]);
         $loaded->method('getCustomerTaxClassIds')->willReturn([3]);
@@ -279,7 +291,7 @@ class TaxRulesTest extends TestCase
         $collection->method('getFirstItem')->willReturn($rule);
         $collection->method('getIterator')->willReturn(new \ArrayIterator([$rule]));
 
-        $rule->method('getCollection')->willReturn($collection);
+        $this->ruleCollectionFactory->method('create')->willReturn($collection);
         $this->ruleFactory->method('create')->willReturn($rule);
         $this->taxRuleResource->method('load')->willReturnSelf();
 
@@ -309,11 +321,7 @@ class TaxRulesTest extends TestCase
         $collection->method('addFieldToFilter')->willReturnSelf();
         $collection->method('getFirstItem')->willReturn($this->ruleWithId(0));
 
-        $this->ruleFactory->method('create')->willReturnCallback(function () use ($collection) {
-            $rule = $this->createMock(Rule::class);
-            $rule->method('getCollection')->willReturn($collection);
-            return $rule;
-        });
+        $this->ruleCollectionFactory->method('create')->willReturn($collection);
 
         $rows = $this->component->export(new ExportContext($existing, false));
 
@@ -412,7 +420,7 @@ class TaxRulesTest extends TestCase
         $collection->method('getFirstItem')->willReturn($rate);
 
         $rateModel = $this->createMock(Rate::class);
-        $rateModel->method('getCollection')->willReturn($collection);
+        $this->rateCollectionFactory->method('create')->willReturn($collection);
 
         $this->rateFactory->method('create')->willReturn($rateModel);
     }
@@ -430,7 +438,7 @@ class TaxRulesTest extends TestCase
         $collection->method('getFirstItem')->willReturn($class);
 
         $classModel = $this->createMock(ClassModel::class);
-        $classModel->method('getCollection')->willReturn($collection);
+        $this->classModelCollectionFactory->method('create')->willReturn($collection);
         $classModel->method('setClassName')->willReturnSelf();
         $classModel->method('setClassType')->willReturnSelf();
         $classModel->method('getId')->willReturn($id);
@@ -453,7 +461,7 @@ class TaxRulesTest extends TestCase
         $collection->method('getFirstItem')->willReturn($existing);
 
         $created = $this->createMock(Rule::class);
-        $created->method('getCollection')->willReturn($collection);
+        $this->ruleCollectionFactory->method('create')->willReturn($collection);
 
         $this->ruleFactory->method('create')->willReturn($created);
 

@@ -21,6 +21,7 @@ use PHPUnit\Framework\TestCase;
 
 class SqlTest extends TestCase
 {
+    private \Magento\Framework\App\Filesystem\DirectoryList $directoryList;
     private SqlSplitProcessor&MockObject $processor;
     private LoggerInterface&MockObject $log;
     private Sql $component;
@@ -33,6 +34,7 @@ class SqlTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->directoryList = $this->createMock(\Magento\Framework\App\Filesystem\DirectoryList::class);
         $this->processor = $this->createMock(SqlSplitProcessor::class);
         $this->log = $this->createMock(LoggerInterface::class);
 
@@ -42,8 +44,11 @@ class SqlTest extends TestCase
             define('BP', sys_get_temp_dir());
         }
         $this->basePath = BP;
+        $this->directoryList->method('getRoot')->willReturn($this->basePath);
 
-        $this->component = new Sql($this->processor, $this->log);
+        $this->component = new Sql($this->processor, $this->log,
+            directoryList: $this->directoryList
+        );
     }
 
     protected function tearDown(): void

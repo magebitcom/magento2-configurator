@@ -22,6 +22,8 @@ use Magento\Store\Model\WebsiteFactory;
 use Magento\Store\Model\Website;
 use Magento\Directory\Model\RegionFactory;
 use Magento\Directory\Model\Region;
+use Magento\Store\Model\ResourceModel\Website as WebsiteResource;
+use Magento\Directory\Model\ResourceModel\Region as RegionResource;
 
 class ShippingTableRates implements ComponentInterface, ExportableComponentInterface
 {
@@ -32,7 +34,9 @@ class ShippingTableRates implements ComponentInterface, ExportableComponentInter
         private readonly TablerateFactory $tablerateFactory,
         private readonly WebsiteFactory $websiteFactory,
         private readonly RegionFactory $regionFactory,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly WebsiteResource $websiteResource,
+        private readonly RegionResource $regionResource
     ) {
     }
 
@@ -57,7 +61,7 @@ class ShippingTableRates implements ComponentInterface, ExportableComponentInter
 
             /** @var Website $websiteModel */
             $websiteModel = $this->websiteFactory->create();
-            $websiteModel->load($website, 'code');
+            $this->websiteResource->load($websiteModel, $website, 'code');
             $websiteId = $websiteModel->getId();
 
             if (!$websiteId) {
@@ -284,7 +288,7 @@ class ShippingTableRates implements ComponentInterface, ExportableComponentInter
     {
         /** @var Website $website */
         $website = $this->websiteFactory->create();
-        $website->load($code, 'code');
+        $this->websiteResource->load($website, $code, 'code');
 
         return $website->getId() ? (int) $website->getId() : null;
     }
@@ -293,7 +297,7 @@ class ShippingTableRates implements ComponentInterface, ExportableComponentInter
     {
         /** @var Website $website */
         $website = $this->websiteFactory->create();
-        $website->load($websiteId);
+        $this->websiteResource->load($website, $websiteId);
 
         return $website->getId() ? (string) $website->getCode() : null;
     }
@@ -310,7 +314,7 @@ class ShippingTableRates implements ComponentInterface, ExportableComponentInter
 
         /** @var Region $region */
         $region = $this->regionFactory->create();
-        $region->load($regionId);
+        $this->regionResource->load($region, $regionId);
 
         $code = $region->getId() ? (string) $region->getCode() : '';
 

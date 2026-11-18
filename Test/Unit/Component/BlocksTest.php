@@ -37,6 +37,8 @@ if (!defined('BP')) {
 
 class BlocksTest extends TestCase
 {
+    private \Magento\Framework\App\Filesystem\DirectoryList $directoryList;
+    private \Magento\Store\Model\ResourceModel\Store $storeResource;
     private BlockInterfaceFactory&MockObject $blockFactory;
     private BlockRepositoryInterface&MockObject $blockRepository;
     private Store&MockObject $storeManager;
@@ -49,6 +51,9 @@ class BlocksTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->directoryList = $this->createMock(\Magento\Framework\App\Filesystem\DirectoryList::class);
+        $this->directoryList->method('getRoot')->willReturn(BP);
+        $this->storeResource = $this->createMock(\Magento\Store\Model\ResourceModel\Store::class);
         $this->blockFactory = $this->getMockBuilder(BlockInterfaceFactory::class)
             ->disableOriginalConstructor()
             ->onlyMethods(['create'])
@@ -73,7 +78,9 @@ class BlocksTest extends TestCase
             $this->filesystem,
             $this->escaper,
             $gate,
-            $this->objectManager
+            $this->objectManager,
+            storeResource: $this->storeResource,
+            directoryList: $this->directoryList
         );
     }
 
@@ -148,9 +155,8 @@ class BlocksTest extends TestCase
         $existing = $this->givenBlockMock(['title' => 'Old']);
         $collection = $this->givenCollection([$existing]);
         $this->blockFactory->method('create')->willReturn($this->givenCollectionSource($collection));
-        $store = $this->createMock(Store::class);
-        $store->method('getId')->willReturn(5);
-        $this->storeManager->method('load')->with('be', 'code')->willReturn($store);
+        $this->storeManager->method('getId')->willReturn(5);
+        $this->storeResource->expects($this->exactly(2))->method('load')->with($this->storeManager, 'be', 'code');
 
         $existing->expects($this->once())->method('setStores')->with([5]);
         $existing->expects($this->once())->method('setStoreId')->with([5]);
@@ -211,7 +217,9 @@ class BlocksTest extends TestCase
             $this->filesystem,
             $this->escaper,
             $gate,
-            $this->objectManager
+            $this->objectManager,
+            storeResource: $this->storeResource,
+            directoryList: $this->directoryList
         );
 
         $existing = $this->givenBlockMock(['title' => 'Old']);
@@ -262,10 +270,9 @@ class BlocksTest extends TestCase
 
     public function testExportAllWritesContentToSourceFile(): void
     {
-        $block = $this->getMockBuilder(Block::class)
+        $block = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\BlockStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['getIdentifier', 'getTitle', 'getContent'])
-            ->addMethods(['getIsActive', 'getStoreId'])
+            ->onlyMethods(['getIdentifier', 'getTitle', 'getContent', 'getIsActive', 'getStoreId'])
             ->getMock();
         $block->method('getIdentifier')->willReturn('footer-links');
         $block->method('getTitle')->willReturn('Footer Links');
@@ -294,10 +301,9 @@ class BlocksTest extends TestCase
     {
         // Refresh mode reads only the tracked identifier, re-pulling DB fields and
         // preserving structural keys (e.g. version) on the entry.
-        $existing = $this->getMockBuilder(Block::class)
+        $existing = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\BlockStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['getTitle', 'getContent'])
-            ->addMethods(['getIsActive', 'getStoreId'])
+            ->onlyMethods(['getTitle', 'getContent', 'getIsActive', 'getStoreId'])
             ->getMock();
         $existing->method('getTitle')->willReturn('Refreshed Title');
         $existing->method('getContent')->willReturn('Refreshed content');
@@ -327,10 +333,9 @@ class BlocksTest extends TestCase
         // A tracked entry using a `source` template gets the DB content written
         // to that file (not inlined) and the entry keeps the `source` key without
         // a `content` key.
-        $existing = $this->getMockBuilder(Block::class)
+        $existing = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\BlockStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['getTitle', 'getContent'])
-            ->addMethods(['getIsActive', 'getStoreId'])
+            ->onlyMethods(['getTitle', 'getContent', 'getIsActive', 'getStoreId'])
             ->getMock();
         $existing->method('getTitle')->willReturn('Tpl Title');
         $existing->method('getContent')->willReturn('templated content');
@@ -450,10 +455,9 @@ class BlocksTest extends TestCase
      */
     private function givenBlockMock(array $data = []): Block&MockObject
     {
-        $block = $this->getMockBuilder(Block::class)
+        $block = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\BlockStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['getData', 'getId', 'setData', 'setIdentifier', 'unsetData'])
-            ->addMethods(['setStoreId', 'setStores'])
+            ->onlyMethods(['getData', 'getId', 'setData', 'setIdentifier', 'unsetData', 'setStoreId', 'setStores'])
             ->getMock();
         $block->method('getData')->willReturnCallback(
             static fn (string $key = '') => $data[$key] ?? null

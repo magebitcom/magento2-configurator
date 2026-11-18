@@ -27,41 +27,9 @@ use Magento\CatalogRule\Model\RuleFactory;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
-// Magento\CatalogRule\Model\RuleFactory is a DI-generated factory; nothing in the
-// unit-test environment guarantees it has been generated, so PHPUnit's
-// reflection-based mock builder may not find it. Provide a minimal stub matching
-// the generated factory signature (create() yields a Rule model) so the component
-// can be constructed and the factory mocked.
-if (!class_exists(RuleFactory::class)) {
-    eval(
-        'namespace Magento\CatalogRule\Model;'
-        . ' class RuleFactory {'
-        . ' public function create(array $data = []) {} }'
-    );
-}
-
-// The processor's removal path is exercised against a real CatalogRuleRepository
-// and Job. As with RuleFactory above, these Magento types are not guaranteed to
-// exist in the unit-test environment, so provide minimal stubs matching the
-// signatures the processor relies on (deleteById/save, applyAll).
-if (!interface_exists(CatalogRuleRepositoryInterface::class)) {
-    eval(
-        'namespace Magento\CatalogRule\Api;'
-        . ' interface CatalogRuleRepositoryInterface {'
-        . ' public function save($rule);'
-        . ' public function deleteById($ruleId); }'
-    );
-}
-
-if (!class_exists(Job::class)) {
-    eval(
-        'namespace Magento\CatalogRule\Model\Rule;'
-        . ' class Job { public function applyAll() {} }'
-    );
-}
-
 class CatalogPriceRulesTest extends TestCase
 {
+    private \Magento\CatalogRule\Model\ResourceModel\Rule\CollectionFactory $ruleCollectionFactory;
     private CatalogPriceRulesProcessor&MockObject $processor;
     private LoggerInterface&MockObject $log;
     private RuleFactory&MockObject $ruleFactory;
@@ -69,6 +37,7 @@ class CatalogPriceRulesTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->ruleCollectionFactory = $this->createMock(\Magento\CatalogRule\Model\ResourceModel\Rule\CollectionFactory::class);
         $this->processor = $this->createMock(CatalogPriceRulesProcessor::class);
         $this->log = $this->createMock(LoggerInterface::class);
         $this->ruleFactory = $this->getMockBuilder(RuleFactory::class)
@@ -79,7 +48,8 @@ class CatalogPriceRulesTest extends TestCase
         $this->component = new CatalogPriceRules(
             $this->processor,
             $this->log,
-            $this->ruleFactory
+            $this->ruleFactory,
+            ruleCollectionFactory: $this->ruleCollectionFactory
         );
     }
 
@@ -407,7 +377,8 @@ class CatalogPriceRulesTest extends TestCase
             $ruleFactory,
             $repo,
             $job,
-            $gate
+            $gate,
+            ruleCollectionFactory: $this->ruleCollectionFactory
         );
     }
 
@@ -469,7 +440,7 @@ class CatalogPriceRulesTest extends TestCase
             ->disableOriginalConstructor()
             ->onlyMethods(['getCollection'])
             ->getMock();
-        $rule->method('getCollection')->willReturn($collection);
+        $this->ruleCollectionFactory->method('create')->willReturn($collection);
 
         return $rule;
     }

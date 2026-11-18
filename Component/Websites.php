@@ -28,6 +28,10 @@ use Magento\Store\Model\Website;
 use Magento\Store\Model\WebsiteFactory;
 use Magento\Indexer\Model\IndexerFactory;
 use Magento\Framework\Event\ManagerInterface;
+use Magento\Store\Model\ResourceModel\Website\CollectionFactory as WebsiteCollectionFactory;
+use Magento\Store\Model\ResourceModel\Website as WebsiteResource;
+use Magento\Store\Model\ResourceModel\Group as GroupResource;
+use Magento\Store\Model\ResourceModel\Store as StoreResource;
 
 class Websites implements ComponentInterface, ExportableComponentInterface
 {
@@ -43,7 +47,11 @@ class Websites implements ComponentInterface, ExportableComponentInterface
         private readonly StoreFactory $storeFactory,
         private readonly GroupFactory $groupFactory,
         private readonly LoggerInterface $log,
-        private readonly ReconciliationGate $gate
+        private readonly ReconciliationGate $gate,
+        private readonly WebsiteCollectionFactory $websiteCollectionFactory,
+        private readonly WebsiteResource $websiteResource,
+        private readonly GroupResource $groupResource,
+        private readonly StoreResource $storeResource
     ) {
     }
 
@@ -104,7 +112,7 @@ class Websites implements ComponentInterface, ExportableComponentInterface
     /**
      * @param string $code
      * @param array $websiteData
-     * @return Website
+     * @return Website|null
      * @SuppressWarnings(PHPMD)
      */
     protected function processWebsite($code, $websiteData, ComponentMode $mode, bool $dryRun, ComponentResult $result)
@@ -115,7 +123,7 @@ class Websites implements ComponentInterface, ExportableComponentInterface
             $this->log->logComment(sprintf("Does the website with code '%s' already exist?", $code), $logNest);
 
             $website = $this->websiteFactory->create();
-            $website->load($code, 'code');
+            $this->websiteResource->load($website, $code, 'code');
 
             // In create mode an existing website is returned untouched so child
             // groups/stores can still attach, but its attributes are not modified.
@@ -173,7 +181,7 @@ class Websites implements ComponentInterface, ExportableComponentInterface
                     $this->log->logInfo(sprintf("[dry-run] Would save website '%s'", $code), $logNest);
                 } else {
                     // Save the website
-                    $website->getResource()->save($website);
+                    $this->websiteResource->save($website);
                     $this->log->logInfo(sprintf("Saved website '%s'", $code), $logNest);
                 }
                 $isNew ? $result->recordCreated() : $result->recordUpdated();
@@ -185,12 +193,14 @@ class Websites implements ComponentInterface, ExportableComponentInterface
             $this->log->logError($e->getMessage(), $logNest);
             $result->addError($e->getMessage());
         }
+
+        return null;
     }
 
     /**
      * @param array $storeGroupData
      * @param Website $website
-     * @return Group
+     * @return Group|null
      * @SuppressWarnings(PHPMD)
      */
     protected function processStoreGroup(
@@ -219,9 +229,9 @@ class Websites implements ComponentInterface, ExportableComponentInterface
             $storeGroup = $this->groupFactory->create();
 
             if (isset($storeGroupData['group_id'])) {
-                $storeGroup->load($storeGroupData['group_id']);
+                $this->groupResource->load($storeGroup, $storeGroupData['group_id']);
             } else {
-                $storeGroup->load($storeGroupData['name'], 'name');
+                $this->groupResource->load($storeGroup, $storeGroupData['name'], 'name');
             }
 
             // Create mode protects an existing store group from modification.
@@ -291,7 +301,7 @@ class Websites implements ComponentInterface, ExportableComponentInterface
                     );
                 } else {
                     // Save the store group
-                    $storeGroup->getResource()->save($storeGroup);
+                    $this->groupResource->save($storeGroup);
                     $this->log->logInfo(sprintf("Saved store group '%s'", $storeGroup->getName()), $logNest);
                 }
                 $isNew ? $result->recordCreated() : $result->recordUpdated();
@@ -304,13 +314,15 @@ class Websites implements ComponentInterface, ExportableComponentInterface
             $this->log->logError($e->getMessage(), $logNest);
             $result->addError($e->getMessage());
         }
+
+        return null;
     }
 
     /**
      * @param $code
      * @param $storeViewData
      * @param Group $storeGroup
-     * @return Store
+     * @return Store|null
      * @SuppressWarnings(PHPMD)
      */
     protected function processStoreView(
@@ -327,7 +339,7 @@ class Websites implements ComponentInterface, ExportableComponentInterface
             $this->log->logComment(sprintf("Does the website with code '%s' already exist?", $code), $logNest);
 
             $storeView = $this->storeFactory->create();
-            $storeView->load($code, 'code');
+            $this->storeResource->load($storeView, $code, 'code');
 
             // Create mode protects an existing store view from modification.
             $request = new ReconciliationRequest(self::ALIAS, 'storeview_' . $code, $mode, (bool) $storeView->getId());
@@ -410,7 +422,7 @@ class Websites implements ComponentInterface, ExportableComponentInterface
                     // Save the store view
                     // Store::afterSave() dispatches store_add for a new store itself; a second dispatch
                     // makes the search engine create the store's indices twice within one second.
-                    $storeView->getResource()->save($storeView);
+                    $this->storeResource->save($storeView);
                     $this->log->logInfo(sprintf("Saved store view '%s'", $code), $logNest);
                 }
                 $isNew ? $result->recordCreated() : $result->recordUpdated();
@@ -422,6 +434,8 @@ class Websites implements ComponentInterface, ExportableComponentInterface
             $this->log->logError($e->getMessage(), $logNest);
             $result->addError($e->getMessage());
         }
+
+        return null;
     }
 
     /**
@@ -445,7 +459,7 @@ class Websites implements ComponentInterface, ExportableComponentInterface
             );
 
             $storeView = $this->storeFactory->create();
-            $storeView->load($storeGroupData['default_store'], 'code');
+            $this->storeResource->load($storeView, $storeGroupData['default_store'], 'code');
 
             if (!$storeView->getId()) {
                 throw new ComponentException(
@@ -488,7 +502,7 @@ class Websites implements ComponentInterface, ExportableComponentInterface
                         $logNest
                     );
                 } else {
-                    $storeGroup->getResource()->save($storeGroup);
+                    $this->groupResource->save($storeGroup);
                     $this->log->logInfo(
                         sprintf(
                             "Set default store view '%s' for store group '%s",
@@ -529,7 +543,7 @@ class Websites implements ComponentInterface, ExportableComponentInterface
     private function exportAll(?string $filter): array
     {
         $out = [];
-        $collection = $this->websiteFactory->create()->getCollection();
+        $collection = $this->websiteCollectionFactory->create();
 
         foreach ($collection as $website) {
             $code = (string) $website->getCode();
@@ -564,7 +578,7 @@ class Websites implements ComponentInterface, ExportableComponentInterface
 
         foreach ($existing['websites'] as $code => $websiteEntry) {
             $website = $this->websiteFactory->create();
-            $website->load((string) $code, 'code');
+            $this->websiteResource->load($website, (string) $code, 'code');
 
             if (!$website->getId()) {
                 // Record no longer exists in the DB; keep the tracked entry as-is.
@@ -667,7 +681,7 @@ class Websites implements ComponentInterface, ExportableComponentInterface
                     continue;
                 }
                 $storeView = $this->storeFactory->create();
-                $storeView->load((string) $viewCode, 'code');
+                $this->storeResource->load($storeView, (string) $viewCode, 'code');
                 if (!$storeView->getId()) {
                     $views[$viewCode] = $viewEntry;
                     continue;
@@ -810,7 +824,7 @@ class Websites implements ComponentInterface, ExportableComponentInterface
     {
         if (isset($entry['group_id'])) {
             $group = $this->groupFactory->create();
-            $group->load($entry['group_id']);
+            $this->groupResource->load($group, $entry['group_id']);
             return $group->getId() ? $group : null;
         }
 

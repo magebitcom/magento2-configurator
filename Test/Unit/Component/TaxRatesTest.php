@@ -25,6 +25,7 @@ use PHPUnit\Framework\TestCase;
 
 class TaxRatesTest extends TestCase
 {
+    private \Magento\Tax\Model\ResourceModel\Calculation\Rate\CollectionFactory $rateCollectionFactory;
     private CsvImportHandler&MockObject $csvImportHandler;
     private LoggerInterface&MockObject $log;
     private RateFactory&MockObject $rateFactory;
@@ -32,6 +33,7 @@ class TaxRatesTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->rateCollectionFactory = $this->createMock(\Magento\Tax\Model\ResourceModel\Calculation\Rate\CollectionFactory::class);
         $this->csvImportHandler = $this->createMock(CsvImportHandler::class);
         $this->log = $this->createMock(LoggerInterface::class);
         $this->rateFactory = $this->getMockBuilder(RateFactory::class)
@@ -42,7 +44,8 @@ class TaxRatesTest extends TestCase
         $this->component = new TaxRates(
             $this->csvImportHandler,
             $this->log,
-            $this->rateFactory
+            $this->rateFactory,
+            rateCollectionFactory: $this->rateCollectionFactory
         );
     }
 
@@ -377,7 +380,7 @@ class TaxRatesTest extends TestCase
             ->disableOriginalConstructor()
             ->onlyMethods(['getCollection'])
             ->getMock();
-        $rate->method('getCollection')->willReturn($collection);
+        $this->rateCollectionFactory->method('create')->willReturn($collection);
 
         return $rate;
     }

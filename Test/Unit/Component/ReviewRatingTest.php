@@ -34,6 +34,7 @@ use PHPUnit\Framework\TestCase;
 
 class ReviewRatingTest extends TestCase
 {
+    private \Magento\Review\Model\ResourceModel\Rating\CollectionFactory $ratingCollectionFactory;
     private RatingFactory&MockObject $ratingFactory;
     private StoreRepositoryInterface&MockObject $storeRepository;
     private OptionFactory&MockObject $optionFactory;
@@ -45,6 +46,7 @@ class ReviewRatingTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->ratingCollectionFactory = $this->createMock(\Magento\Review\Model\ResourceModel\Rating\CollectionFactory::class);
         $this->ratingFactory = $this->getMockBuilder(RatingFactory::class)
             ->disableOriginalConstructor()
             ->onlyMethods(['create'])
@@ -80,16 +82,25 @@ class ReviewRatingTest extends TestCase
             $this->ratingResource,
             $this->optionResource,
             $this->log,
-            $gate
+            $gate,
+            ratingCollectionFactory: $this->ratingCollectionFactory
         );
     }
 
     public function testCreatesRatingWhenItDoesNotExist(): void
     {
-        $rating = $this->getMockBuilder(Rating::class)
+        $rating = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\RatingStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['load', 'getOptions', 'getId', 'setData', 'setEntityId'])
-            ->addMethods(['setRatingCode', 'setStores', 'getRatingCode'])
+            ->onlyMethods([
+                'load',
+                'getOptions',
+                'getId',
+                'setData',
+                'setEntityId',
+                'setRatingCode',
+                'setStores',
+                'getRatingCode',
+            ])
             ->getMock();
         $rating->method('load')->willReturnSelf();
         $rating->expects($this->once())->method('setRatingCode')->with('Quality');
@@ -252,10 +263,9 @@ class ReviewRatingTest extends TestCase
 
     public function testFullExportDumpsEveryProductRating(): void
     {
-        $rating = $this->getMockBuilder(Rating::class)
+        $rating = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\RatingStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['getId', 'getData'])
-            ->addMethods(['getRatingCode'])
+            ->onlyMethods(['getId', 'getData', 'getRatingCode'])
             ->getMock();
         $rating->method('getRatingCode')->willReturn('Quality');
         $rating->method('getId')->willReturn(7);
@@ -272,7 +282,7 @@ class ReviewRatingTest extends TestCase
             ->disableOriginalConstructor()
             ->onlyMethods(['getCollection'])
             ->getMock();
-        $source->method('getCollection')->willReturn($collection);
+        $this->ratingCollectionFactory->method('create')->willReturn($collection);
         $this->ratingFactory->method('create')->willReturn($source);
 
         $store = $this->createMock(StoreInterface::class);
@@ -348,10 +358,18 @@ class ReviewRatingTest extends TestCase
      */
     private function givenLoadedRating(int $id): Rating&MockObject
     {
-        $rating = $this->getMockBuilder(Rating::class)
+        $rating = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\RatingStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['load', 'getOptions', 'getId', 'setData', 'setEntityId'])
-            ->addMethods(['setRatingCode', 'setStores', 'getRatingCode'])
+            ->onlyMethods([
+                'load',
+                'getOptions',
+                'getId',
+                'setData',
+                'setEntityId',
+                'setRatingCode',
+                'setStores',
+                'getRatingCode',
+            ])
             ->getMock();
         $rating->method('load')->willReturnSelf();
         if ($id > 0) {

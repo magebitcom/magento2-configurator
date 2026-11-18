@@ -32,6 +32,7 @@ use PHPUnit\Framework\TestCase;
 
 class CustomerAttributesTest extends TestCase
 {
+    private \Magento\Catalog\Model\ResourceModel\Attribute $catalogAttributeResource;
     private EavSetup&MockObject $eavSetup;
     private AttributeRepository&MockObject $attributeRepository;
     private CustomerSetupFactory&MockObject $customerSetupFactory;
@@ -45,6 +46,7 @@ class CustomerAttributesTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->catalogAttributeResource = $this->createMock(\Magento\Catalog\Model\ResourceModel\Attribute::class);
         $this->eavSetup = $this->createMock(EavSetup::class);
         $this->attributeRepository = $this->createMock(AttributeRepository::class);
         $this->customerSetupFactory = $this->getMockBuilder(CustomerSetupFactory::class)
@@ -76,7 +78,8 @@ class CustomerAttributesTest extends TestCase
             $this->eavConfig,
             $gate,
             $this->searchCriteriaBuilder,
-            $this->swatchHelper
+            $this->swatchHelper,
+            catalogAttributeResource: $this->catalogAttributeResource
         );
     }
 

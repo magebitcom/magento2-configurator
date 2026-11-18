@@ -26,6 +26,7 @@ use Magento\Customer\Model\ResourceModel\Attribute;
 use Magento\Eav\Model\Config as EavConfig;
 use Magento\Eav\Model\ResourceModel\Entity\Attribute\Option\CollectionFactory as AttrOptionCollectionFactory;
 use Magento\Swatches\Helper\Data as SwatchHelper;
+use Magento\Catalog\Model\ResourceModel\Attribute as CatalogAttributeResource;
 
 /**
  * @SuppressWarnings(PHPMD.LongVariable)
@@ -71,7 +72,8 @@ class CustomerAttributes extends Attributes
         EavConfig $eavConfig,
         ReconciliationGate $gate,
         SearchCriteriaBuilder $searchCriteriaBuilder,
-        SwatchHelper $swatchHelper
+        SwatchHelper $swatchHelper,
+        CatalogAttributeResource $catalogAttributeResource
     ) {
         parent::__construct(
             $eavSetup,
@@ -81,7 +83,8 @@ class CustomerAttributes extends Attributes
             $eavConfig,
             $gate,
             $searchCriteriaBuilder,
-            $swatchHelper
+            $swatchHelper,
+            $catalogAttributeResource
         );
         $this->attributeConfigMap = array_merge($this->attributeConfigMap, $this->customerConfigMap);
     }

@@ -34,6 +34,8 @@ use PHPUnit\Framework\TestCase;
 
 class CategoriesTest extends TestCase
 {
+    private \Magento\Catalog\Model\ResourceModel\Category\CollectionFactory $categoryCollectionFactory;
+    private \Magento\Store\Model\ResourceModel\Group\CollectionFactory $groupCollectionFactory;
     private CategoryFactory&MockObject $categoryFactory;
     private GroupFactory&MockObject $groupFactory;
     private DirectoryList&MockObject $dirList;
@@ -45,6 +47,8 @@ class CategoriesTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->categoryCollectionFactory = $this->createMock(\Magento\Catalog\Model\ResourceModel\Category\CollectionFactory::class);
+        $this->groupCollectionFactory = $this->createMock(\Magento\Store\Model\ResourceModel\Group\CollectionFactory::class);
         $this->categoryFactory = $this->getMockBuilder(CategoryFactory::class)
             ->disableOriginalConstructor()
             ->onlyMethods(['create'])
@@ -74,7 +78,9 @@ class CategoriesTest extends TestCase
             $this->blockFactory,
             $this->blockResource,
             $this->categoryResource,
-            $gate
+            $gate,
+            groupCollectionFactory: $this->groupCollectionFactory,
+            categoryCollectionFactory: $this->categoryCollectionFactory
         );
     }
 
@@ -366,7 +372,7 @@ class CategoriesTest extends TestCase
         $groupCollection->method('getIterator')->willReturn(new \ArrayIterator([$group]));
 
         $groupModel = $this->createMock(Group::class);
-        $groupModel->method('getCollection')->willReturn($groupCollection);
+        $this->groupCollectionFactory->method('create')->willReturn($groupCollection);
         $this->groupFactory->method('create')->willReturn($groupModel);
 
         // Root category (id 2) with a single child "Shirts" (id 10), no grandchildren.
@@ -383,8 +389,9 @@ class CategoriesTest extends TestCase
         $rootChildrenCollection = $this->givenChildrenCollection([$shirts]);
         $shirtsChildrenCollection = $this->givenChildrenCollection([]);
 
-        $root->method('getCollection')->willReturn($rootChildrenCollection);
-        $shirts->method('getCollection')->willReturn($shirtsChildrenCollection);
+        $this->categoryCollectionFactory->method('create')->willReturnOnConsecutiveCalls(
+            $rootChildrenCollection, $shirtsChildrenCollection
+        );
 
         // create() calls: getDefaultCategory loads root, then exportChildren for root,
         // then exportChildren for the shirts child.
@@ -430,7 +437,7 @@ class CategoriesTest extends TestCase
         $groupCollection->method('getFirstItem')->willReturn($group);
 
         $groupModel = $this->createMock(Group::class);
-        $groupModel->method('getCollection')->willReturn($groupCollection);
+        $this->groupCollectionFactory->method('create')->willReturn($groupCollection);
         $this->groupFactory->method('create')->willReturn($groupModel);
 
         $root = $this->createMock(Category::class);
@@ -445,7 +452,9 @@ class CategoriesTest extends TestCase
         $findCollection->method('addFieldToFilter')->willReturnSelf();
         $findCollection->method('setPageSize')->willReturnSelf();
         $findCollection->method('getFirstItem')->willReturn($shirtsLookup);
-        $root->method('getCollection')->willReturn($findCollection);
+        $this->categoryCollectionFactory->method('create')->willReturnOnConsecutiveCalls(
+            $findCollection, $this->givenChildrenCollection([])
+        );
 
         // The loaded "Shirts" category with its current admin fields and no children.
         $shirts = $this->createMock(Category::class);
@@ -455,11 +464,10 @@ class CategoriesTest extends TestCase
             static fn (string $field) => $field === 'is_active' ? '1' : null
         );
         $shirts->method('load')->willReturnSelf();
-        $shirts->method('getCollection')->willReturn($this->givenChildrenCollection([]));
 
         // create() calls: getDefaultCategory root, findChildByName root, load shirts,
         // exportChildren for shirts.
-        $this->categoryFactory->method('create')->willReturnOnConsecutiveCalls($root, $root, $shirts, $shirts);
+        $this->categoryFactory->method('create')->willReturnOnConsecutiveCalls($root, $shirts);
 
         $result = $this->component->export(new ExportContext($existing, false));
 
@@ -498,7 +506,7 @@ class CategoriesTest extends TestCase
         $collection->method('getFirstItem')->willReturn($group);
 
         $groupModel = $this->createMock(Group::class);
-        $groupModel->method('getCollection')->willReturn($collection);
+        $this->groupCollectionFactory->method('create')->willReturn($collection);
         $this->groupFactory->method('create')->willReturn($groupModel);
     }
 
@@ -549,7 +557,7 @@ class CategoriesTest extends TestCase
         $entityType->method('getDefaultAttributeSetId')->willReturn(3);
         $resource = $this->createMock(CategoryResource::class);
         $resource->method('getEntityType')->willReturn($entityType);
-        $category->method('getResource')->willReturn($resource);
+        $this->categoryResource->method('getEntityType')->willReturn($entityType);
 
         return $category;
     }
@@ -564,7 +572,7 @@ class CategoriesTest extends TestCase
         $collection->method('addFieldToFilter')->willReturnSelf();
         $collection->method('setPageSize')->willReturnSelf();
         $collection->method('getFirstItem')->willReturn($category);
-        $category->method('getCollection')->willReturn($collection);
+        $this->categoryCollectionFactory->method('create')->willReturn($collection);
     }
 
     /**

@@ -20,17 +20,9 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
 
-/**
- * An exportable component for use in these tests: it returns whatever data it
- * was primed with, and records the ExportContext it last received so the test
- * can assert on full vs refresh behaviour.
- */
-interface ExportableComponentStub extends ComponentInterface, ExportableComponentInterface
-{
-}
-
 class ExporterTest extends TestCase
 {
+    private \Magento\Framework\App\Filesystem\DirectoryList $directoryList;
     private ComponentListInterface&MockObject $componentList;
     private LoggerInterface&MockObject $log;
     private Exporter $exporter;
@@ -43,6 +35,7 @@ class ExporterTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->directoryList = $this->createMock(\Magento\Framework\App\Filesystem\DirectoryList::class);
         $this->componentList = $this->createMock(ComponentListInterface::class);
         $this->log = $this->createMock(LoggerInterface::class);
 
@@ -52,11 +45,14 @@ class ExporterTest extends TestCase
             define('BP', sys_get_temp_dir() . '/configurator-export-' . uniqid());
         }
         $this->basePath = BP;
+        $this->directoryList->method('getRoot')->willReturn($this->basePath);
         if (!is_dir($this->basePath . '/app/etc')) {
             mkdir($this->basePath . '/app/etc', 0777, true);
         }
 
-        $this->exporter = new Exporter($this->componentList, $this->log);
+        $this->exporter = new Exporter($this->componentList, $this->log,
+            directoryList: $this->directoryList
+        );
     }
 
     protected function tearDown(): void

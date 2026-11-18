@@ -36,6 +36,7 @@ use Magento\Store\Model\Store;
 use Symfony\Component\Filesystem\Filesystem;
 use Magento\Framework\App\Area;
 use Magento\Framework\EntityManager\MetadataPool;
+use Magento\Framework\App\Filesystem\DirectoryList as DirectoryList;
 
 /**
  * @see \Magebit\Configurator\Component\Pages
@@ -88,6 +89,7 @@ class Pages implements ComponentInterface, ExportableComponentInterface
         private readonly ResourceConnection $resourceConnection,
         private readonly MetadataPool $metadataPool,
         private readonly Emulation $emulation,
+        private readonly DirectoryList $directoryList
     ) {
         if (class_exists('Hyva\Theme\Model\ViewModelRegistry')) {
             $this->viewModelRegistry = $this->objectManager->create('Hyva\Theme\Model\ViewModelRegistry');
@@ -218,7 +220,7 @@ class Pages implements ComponentInterface, ExportableComponentInterface
                         if ($key == "source") {
                             $key = 'content';
 
-                            $file = BP . '/' . $value;
+                            $file = $this->directoryList->getRoot() . '/' . $value;
 
                             if (!$this->filesystem->exists($file)) {
                                 return;
@@ -572,7 +574,7 @@ class Pages implements ComponentInterface, ExportableComponentInterface
      */
     private function writeSourceContent(string $source, string $content, bool $dryRun): void
     {
-        $path = BP . '/' . ltrim($source, '/');
+        $path = $this->directoryList->getRoot() . '/' . ltrim($source, '/');
 
         if ($dryRun) {
             $this->log->logInfo(sprintf('[dry-run] Would write source content to %s', $path));

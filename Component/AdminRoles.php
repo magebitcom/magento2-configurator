@@ -25,6 +25,8 @@ use Magento\Authorization\Model\ResourceModel\Role as RoleResource;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\Authorization\Model\RulesFactory;
 use Magento\Authorization\Model\UserContextInterface;
+use Magento\Authorization\Model\ResourceModel\Role\CollectionFactory as RoleCollectionFactory;
+use Magento\Authorization\Model\ResourceModel\Rules\CollectionFactory as RulesCollectionFactory;
 
 /**
  * Creates admin roles and assigns their ACL resources from configurator YAML.
@@ -41,7 +43,9 @@ class AdminRoles implements ComponentInterface, ExportableComponentInterface
         private readonly RoleResource $roleResource,
         private readonly RulesFactory $rulesFactory,
         private readonly LoggerInterface $log,
-        private readonly ReconciliationGate $gate
+        private readonly ReconciliationGate $gate,
+        private readonly RoleCollectionFactory $roleCollectionFactory,
+        private readonly RulesCollectionFactory $rulesCollectionFactory
     ) {
     }
 
@@ -98,7 +102,7 @@ class AdminRoles implements ComponentInterface, ExportableComponentInterface
         ComponentResult $result
     ): void {
         $role = $this->roleFactory->create();
-        $existing = $role->getCollection()->addFieldToFilter('role_name', $roleName)->getFirstItem();
+        $existing = $this->roleCollectionFactory->create()->addFieldToFilter('role_name', $roleName)->getFirstItem();
         $exists = (bool) $existing->getId();
 
         $request = new ReconciliationRequest(self::ALIAS, $roleName, $mode, $exists, $version ? (int) $version : null);
@@ -152,7 +156,7 @@ class AdminRoles implements ComponentInterface, ExportableComponentInterface
     private function removeAdminRole(string $roleName, bool $dryRun, ComponentResult $result): void
     {
         $role = $this->roleFactory->create();
-        $existing = $role->getCollection()->addFieldToFilter('role_name', $roleName)->getFirstItem();
+        $existing = $this->roleCollectionFactory->create()->addFieldToFilter('role_name', $roleName)->getFirstItem();
 
         if (!$existing->getId()) {
             $this->log->logComment(sprintf("Admin Role '%s' not present, nothing to remove", $roleName));
@@ -256,7 +260,7 @@ class AdminRoles implements ComponentInterface, ExportableComponentInterface
      */
     private function exportAll(?string $filter): array
     {
-        $collection = $this->roleFactory->create()->getCollection()
+        $collection = $this->roleCollectionFactory->create()
             ->addFieldToFilter('role_type', RoleGroup::ROLE_TYPE)
             ->addFieldToFilter('user_type', UserContextInterface::USER_TYPE_ADMIN);
 
@@ -280,8 +284,7 @@ class AdminRoles implements ComponentInterface, ExportableComponentInterface
      */
     private function findRoleIdByName(string $roleName): ?int
     {
-        $existing = $this->roleFactory->create()
-            ->getCollection()
+        $existing = $this->roleCollectionFactory->create()
             ->addFieldToFilter('role_name', $roleName)
             ->getFirstItem();
 
@@ -296,8 +299,7 @@ class AdminRoles implements ComponentInterface, ExportableComponentInterface
      */
     private function getResourceIdsForRole(int $roleId): array
     {
-        $rulesCollection = $this->rulesFactory->create()
-            ->getCollection()
+        $rulesCollection = $this->rulesCollectionFactory->create()
             ->addFieldToFilter('role_id', $roleId)
             ->addFieldToFilter('permission', 'allow');
 

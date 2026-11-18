@@ -52,7 +52,7 @@ class HyvaBlocksTest extends TestCase
         // helper method needs stubbing on the adapter.
         $this->connection = $this->getMockBuilder(AdapterInterface::class)
             ->disableOriginalConstructor()
-            ->getMockForAbstractClass();
+            ->getMock();
         $this->directoryList = $this->createMock(DirectoryList::class);
         $this->moduleManager = $this->createMock(ModuleManager::class);
         $this->log = $this->createMock(LoggerInterface::class);

@@ -28,6 +28,8 @@ use PHPUnit\Framework\TestCase;
 
 class AdminRolesTest extends TestCase
 {
+    private \Magento\Authorization\Model\ResourceModel\Rules\CollectionFactory $rulesCollectionFactory;
+    private \Magento\Authorization\Model\ResourceModel\Role\CollectionFactory $roleCollectionFactory;
     private RoleFactory&MockObject $roleFactory;
     private RoleResource&MockObject $roleResource;
     private RulesFactory&MockObject $rulesFactory;
@@ -36,6 +38,8 @@ class AdminRolesTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->rulesCollectionFactory = $this->createMock(\Magento\Authorization\Model\ResourceModel\Rules\CollectionFactory::class);
+        $this->roleCollectionFactory = $this->createMock(\Magento\Authorization\Model\ResourceModel\Role\CollectionFactory::class);
         $this->roleFactory = $this->getMockBuilder(RoleFactory::class)
             ->disableOriginalConstructor()
             ->onlyMethods(['create'])
@@ -57,7 +61,9 @@ class AdminRolesTest extends TestCase
             $this->roleResource,
             $this->rulesFactory,
             $this->log,
-            $gate
+            $gate,
+            roleCollectionFactory: $this->roleCollectionFactory,
+            rulesCollectionFactory: $this->rulesCollectionFactory
         );
     }
 
@@ -222,7 +228,7 @@ class AdminRolesTest extends TestCase
         $roleCollection->method('addFieldToFilter')->willReturnSelf();
         $roleCollection->method('getIterator')->willReturn(new \ArrayIterator([$role]));
         $roleModel = $this->roleMock(['getCollection']);
-        $roleModel->method('getCollection')->willReturn($roleCollection);
+        $this->roleCollectionFactory->method('create')->willReturn($roleCollection);
         $this->roleFactory->method('create')->willReturn($roleModel);
 
         // Rules collection yields one allowed resource row.
@@ -247,7 +253,7 @@ class AdminRolesTest extends TestCase
         $collection->method('getFirstItem')->willReturn($lookup);
 
         $roleModel = $this->roleMock(['getCollection']);
-        $roleModel->method('getCollection')->willReturn($collection);
+        $this->roleCollectionFactory->method('create')->willReturn($collection);
         $this->roleFactory->method('create')->willReturn($roleModel);
 
         $rulesModel = $this->givenRulesWithResources(['Magento_Backend::content']);
@@ -319,7 +325,7 @@ class AdminRolesTest extends TestCase
             'setUserType',
             'setSortOrder',
         ]);
-        $role->method('getCollection')->willReturn($collection);
+        $this->roleCollectionFactory->method('create')->willReturn($collection);
         $role->method('getRoleName')->willReturn('Editors');
         $this->roleFactory->method('create')->willReturn($role);
 
@@ -327,38 +333,22 @@ class AdminRolesTest extends TestCase
     }
 
     /**
-     * Build a Role mock. AbstractModel data getters/setters such as getRoleName,
-     * setRoleName, setParentId, setRoleType, setUserType and setSortOrder are magic
-     * (@method) methods, so they must be declared via addMethods(); declared methods
-     * such as getId and getCollection go through onlyMethods().
-     *
      * @param string[] $methods
      */
     private function roleMock(array $methods): Role&MockObject
     {
-        $magic = ['getRoleName', 'setRoleName', 'setParentId', 'setRoleType', 'setUserType', 'setSortOrder'];
-
-        $addMethods = array_values(array_intersect($methods, $magic));
-        $onlyMethods = array_values(array_diff($methods, $magic));
-
-        $builder = $this->getMockBuilder(Role::class)->disableOriginalConstructor();
-        if ($onlyMethods !== []) {
-            $builder->onlyMethods($onlyMethods);
-        }
-        if ($addMethods !== []) {
-            $builder->addMethods($addMethods);
-        }
-
-        return $builder->getMock();
+        return $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\RoleStub::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods($methods)
+            ->getMock();
     }
 
     private function givenRules(): Rules&MockObject
     {
         // setRoleId/setResources are magic (@method) setters; saveRel is declared.
-        $rules = $this->getMockBuilder(Rules::class)
+        $rules = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\RulesStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['saveRel'])
-            ->addMethods(['setRoleId', 'setResources'])
+            ->onlyMethods(['saveRel', 'setRoleId', 'setResources'])
             ->getMock();
         $rules->method('setRoleId')->willReturnSelf();
         $rules->method('setResources')->willReturnSelf();
@@ -376,9 +366,9 @@ class AdminRolesTest extends TestCase
     {
         $rows = [];
         foreach ($resources as $resourceId) {
-            $rule = $this->getMockBuilder(Rules::class)
+            $rule = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\RulesStub::class)
                 ->disableOriginalConstructor()
-                ->addMethods(['getResourceId'])
+                ->onlyMethods(['getResourceId'])
                 ->getMock();
             $rule->method('getResourceId')->willReturn($resourceId);
             $rows[] = $rule;
@@ -389,7 +379,7 @@ class AdminRolesTest extends TestCase
         $collection->method('getIterator')->willReturn(new \ArrayIterator($rows));
 
         $rules = $this->createMock(Rules::class);
-        $rules->method('getCollection')->willReturn($collection);
+        $this->rulesCollectionFactory->method('create')->willReturn($collection);
 
         return $rules;
     }

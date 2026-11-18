@@ -25,6 +25,10 @@ use Magento\Tax\Model\Calculation\RateFactory;
 use Magento\Tax\Model\ClassModelFactory;
 use Magento\Tax\Model\ResourceModel\Calculation\Rule as TaxRuleResource;
 use Magento\Tax\Model\ResourceModel\TaxClass as TaxClassResource;
+use Magento\Tax\Model\ResourceModel\Calculation\Rate\CollectionFactory as RateCollectionFactory;
+use Magento\Tax\Model\ResourceModel\TaxClass\CollectionFactory as ClassModelCollectionFactory;
+use Magento\Tax\Model\ResourceModel\Calculation\Rule\CollectionFactory as RuleCollectionFactory;
+use Magento\Tax\Model\ResourceModel\Calculation\Rate as RateResource;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
@@ -70,7 +74,11 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
         private readonly TaxRuleResource $taxRuleResource,
         private readonly TaxClassResource $taxClassResource,
         private readonly LoggerInterface $log,
-        private readonly ReconciliationGate $gate
+        private readonly ReconciliationGate $gate,
+        private readonly RateCollectionFactory $rateCollectionFactory,
+        private readonly ClassModelCollectionFactory $classModelCollectionFactory,
+        private readonly RuleCollectionFactory $ruleCollectionFactory,
+        private readonly RateResource $rateResource
     ) {
     }
 
@@ -192,7 +200,7 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
         $rateNamesArray = explode(',', $rateNames);
 
         foreach ($rateNamesArray as $name) {
-            $rateFactory = $this->rateFactory->create()->getCollection();
+            $rateFactory = $this->rateCollectionFactory->create();
             $rate = $rateFactory->addFieldToFilter('code', $name)->load()->getFirstItem();
             $rateIds[] = $rate->getId();
         }
@@ -212,7 +220,7 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
         $taxClassIds = [];
         $taxClassNamesArray = explode(',', $names);
         $classModel = $this->classModelFactory->create();
-        $classCollection = $classModel->getCollection();
+        $classCollection = $this->classModelCollectionFactory->create();
 
         foreach ($taxClassNamesArray as $name) {
             $class = $classCollection->addFieldToFilter('class_name', $name)->getFirstItem();
@@ -248,7 +256,7 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
     private function createTaxRule(array $ruleData, ComponentContext $context, ComponentResult $result): void
     {
         $rule = $this->ruleFactory->create();
-        $existing = $rule->getCollection()->addFieldToFilter('code', $ruleData['code'])->getFirstItem();
+        $existing = $this->ruleCollectionFactory->create()->addFieldToFilter('code', $ruleData['code'])->getFirstItem();
         $exists = (bool) $existing->getId();
 
         // Per-entity diff: an existing rule whose rate/class ids and scalar fields
@@ -380,7 +388,7 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
     private function removeTaxRule(string $code, bool $dryRun, ComponentResult $result): void
     {
         $rule = $this->ruleFactory->create();
-        $existing = $rule->getCollection()->addFieldToFilter('code', $code)->getFirstItem();
+        $existing = $this->ruleCollectionFactory->create()->addFieldToFilter('code', $code)->getFirstItem();
 
         if (!$existing->getId()) {
             $this->log->logComment(
@@ -468,7 +476,7 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
     {
         $rows = [self::COLUMNS];
 
-        $collection = $this->ruleFactory->create()->getCollection();
+        $collection = $this->ruleCollectionFactory->create();
         if ($filter !== null && $filter !== '') {
             $collection->addFieldToFilter('code', ['like' => $filter . '%']);
         }
@@ -490,7 +498,7 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
      */
     private function loadRuleByCode(string $code): ?object
     {
-        $id = $this->ruleFactory->create()->getCollection()
+        $id = $this->ruleCollectionFactory->create()
             ->addFieldToFilter('code', $code)
             ->getFirstItem()
             ->getId();
@@ -544,7 +552,7 @@ class TaxRules implements ComponentInterface, ExportableComponentInterface
         $codes = [];
         foreach ($rateIds as $rateId) {
             $rate = $this->rateFactory->create();
-            $rate->load((int) $rateId);
+            $this->rateResource->load($rate, (int) $rateId);
             if ($rate->getId()) {
                 $codes[] = (string) $rate->getCode();
             }

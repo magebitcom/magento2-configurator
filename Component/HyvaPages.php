@@ -24,6 +24,7 @@ use Magento\Framework\App\Filesystem\DirectoryList;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\Module\Manager as ModuleManager;
 use Magento\Framework\ObjectManagerInterface;
+use Magento\Cms\Model\ResourceModel\Page as PageResource;
 
 /**
  * Manage Hyvä Commerce CMS page-builder content (the JSON draft/published
@@ -65,7 +66,8 @@ class HyvaPages implements ComponentInterface, ExportableComponentInterface
         private readonly ModuleManager $moduleManager,
         private readonly LoggerInterface $log,
         private readonly ReconciliationGate $gate,
-        private readonly ObjectManagerInterface $objectManager
+        private readonly ObjectManagerInterface $objectManager,
+        private readonly PageResource $pageResource
     ) {
     }
 
@@ -164,7 +166,7 @@ class HyvaPages implements ComponentInterface, ExportableComponentInterface
     {
         $page = $this->cmsPageFactory->create();
         // phpcs:ignore Magento2.Legacy.RestrictedCode
-        $page->load($identifier, 'identifier');
+        $this->pageResource->load($page, $identifier, 'identifier');
 
         return $page->getId() ? (int) $page->getId() : null;
     }

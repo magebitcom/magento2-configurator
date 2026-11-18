@@ -26,6 +26,7 @@ use Magebit\Configurator\Model\ComponentResult;
 use Magento\InventoryApi\Api\Data\SourceItemInterface;
 use Magento\InventoryApi\Api\Data\SourceItemInterfaceFactory;
 use Magento\InventoryApi\Api\SourceItemsSaveInterface;
+use Magento\Catalog\Model\ResourceModel\Product as ProductResource;
 
 /**
  * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
@@ -95,7 +96,8 @@ class Products implements ComponentInterface
         private readonly LoggerInterface $log,
         private readonly ProductCollectionFactory $productCollectionFactory,
         private readonly SourceItemInterfaceFactory $sourceItemFactory,
-        private readonly SourceItemsSaveInterface $sourceItemsSave
+        private readonly SourceItemsSaveInterface $sourceItemsSave,
+        private readonly ProductResource $productResource
     ) {
     }
 
@@ -239,12 +241,16 @@ class Products implements ComponentInterface
             return $result;
         }
 
+        $import = null;
         try {
             $import = $this->importerFactory->create();
             $import->setMultipleValueSeparator(self::SEPARATOR);
             $import->processImport($validatedProducts);
         } catch (\Exception $e) {
             $this->log->logError($e->getMessage());
+        }
+        if ($import === null) {
+            return $result;
         }
         $this->log->logInfo($import->getLogTrace());
         $this->log->logError($import->getErrorMessages());
@@ -407,7 +413,7 @@ class Products implements ComponentInterface
                     }
                     $productModel = $this->productFactory->create();
                     $id = $productModel->getIdBySku($sku);
-                    $productModel->load($id);
+                    $this->productResource->load($productModel, $id);
 
                     if ($productModel->getId()) {
                         $configSkuAttributes = $this->constructAttributeData($attributes, $productModel);
@@ -448,7 +454,7 @@ class Products implements ComponentInterface
                 $skuAttributes = '';
                 break;
             }
-            $productAttribute = $productModel->getResource()->getAttribute($attributeCode);
+            $productAttribute = $this->productResource->getAttribute($attributeCode);
             if ($productAttribute !== false) {
                 if ($attrCounter > 1) {
                     $skuAttributes .= self::SEPARATOR;

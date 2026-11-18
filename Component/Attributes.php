@@ -29,6 +29,7 @@ use Magento\Catalog\Model\ResourceModel\Eav\Attribute;
 use Magento\Eav\Model\Config as EavConfig;
 use Magento\Eav\Model\ResourceModel\Entity\Attribute\Option\CollectionFactory as AttrOptionCollectionFactory;
 use Magento\Swatches\Helper\Data as SwatchHelper;
+use Magento\Catalog\Model\ResourceModel\Attribute as AttributeResource;
 
 /**
  * @SuppressWarnings(PHPMD.LongVariable)
@@ -124,7 +125,8 @@ class Attributes implements ComponentInterface, ExportableComponentInterface
         protected readonly EavConfig $eavConfig,
         protected readonly ReconciliationGate $gate,
         protected readonly SearchCriteriaBuilder $searchCriteriaBuilder,
-        protected readonly SwatchHelper $swatchHelper
+        protected readonly SwatchHelper $swatchHelper,
+        private readonly AttributeResource $attributeResource
     ) {
     }
 
@@ -628,7 +630,7 @@ class Attributes implements ComponentInterface, ExportableComponentInterface
             return;
         }
         $attribute->addData($attributeData);
-        $attribute->getResource()->save($attribute);
+        $this->attributeResource->save($attribute);
     }
 
     /**
@@ -654,7 +656,7 @@ class Attributes implements ComponentInterface, ExportableComponentInterface
             return;
         }
         $attribute->addData($attributeData);
-        $attribute->getResource()->save($attribute);
+        $this->attributeResource->save($attribute);
     }
 
 

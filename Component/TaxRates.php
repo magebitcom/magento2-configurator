@@ -20,6 +20,7 @@ use Magebit\Configurator\Model\ComponentResult;
 use Magebit\Configurator\Model\Export\ExportContext;
 use Magento\Tax\Model\Calculation\RateFactory;
 use Magento\TaxImportExport\Model\Rate\CsvImportHandler;
+use Magento\Tax\Model\ResourceModel\Calculation\Rate\CollectionFactory as RateCollectionFactory;
 
 class TaxRates implements ComponentInterface, ExportableComponentInterface
 {
@@ -48,7 +49,8 @@ class TaxRates implements ComponentInterface, ExportableComponentInterface
     public function __construct(
         private readonly CsvImportHandler $csvImportHandler,
         private readonly LoggerInterface $log,
-        private readonly RateFactory $rateFactory
+        private readonly RateFactory $rateFactory,
+        private readonly RateCollectionFactory $rateCollectionFactory
     ) {
     }
 
@@ -197,7 +199,7 @@ class TaxRates implements ComponentInterface, ExportableComponentInterface
             return [];
         }
 
-        $collection = $this->rateFactory->create()->getCollection()->addFieldToFilter('code', ['in' => $codes]);
+        $collection = $this->rateCollectionFactory->create()->addFieldToFilter('code', ['in' => $codes]);
 
         $existing = [];
         foreach ($collection as $rate) {
@@ -304,7 +306,7 @@ class TaxRates implements ComponentInterface, ExportableComponentInterface
     {
         $header = ['code', 'tax_country_id', 'tax_region_id', 'rate', 'tax_postcode', 'zip_is_range', 'zip_from', 'zip_to'];
 
-        $collection = $this->rateFactory->create()->getCollection();
+        $collection = $this->rateCollectionFactory->create();
         if ($filter !== null && $filter !== '') {
             $collection->addFieldToFilter('code', ['like' => $filter . '%']);
         }
@@ -331,7 +333,7 @@ class TaxRates implements ComponentInterface, ExportableComponentInterface
             return [];
         }
 
-        $collection = $this->rateFactory->create()->getCollection()->addFieldToFilter('code', ['in' => $codes]);
+        $collection = $this->rateCollectionFactory->create()->addFieldToFilter('code', ['in' => $codes]);
 
         $rates = [];
         foreach ($collection as $rate) {

@@ -18,6 +18,7 @@ use Magento\CatalogRule\Api\CatalogRuleRepositoryInterface;
 use Magento\CatalogRule\Model\Rule;
 use Magento\CatalogRule\Model\RuleFactory;
 use Magento\CatalogRule\Model\Rule\Job;
+use Magento\CatalogRule\Model\ResourceModel\Rule\CollectionFactory as RuleCollectionFactory;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
@@ -88,7 +89,8 @@ class CatalogPriceRulesProcessor implements ComponentProcessorInterface
         RuleFactory $ruleFactory,
         CatalogRuleRepositoryInterface $catalogRuleRepo,
         Job $ruleJob,
-        ReconciliationGate $gate
+        ReconciliationGate $gate,
+        private readonly RuleCollectionFactory $ruleCollectionFactory
     ) {
         $this->logger = $logger;
         $this->ruleFactory = $ruleFactory;
@@ -173,7 +175,7 @@ class CatalogPriceRulesProcessor implements ComponentProcessorInterface
 
             // Check the existing rule by the rule name
             /** @var \Magento\CatalogRule\Model\ResourceModel\Rule\Collection $ruleCollection */
-            $ruleCollection = $this->ruleFactory->create()->getCollection()
+            $ruleCollection = $this->ruleCollectionFactory->create()
                 ->addFieldToFilter('name', $ruleData['name']);
 
             // Check to see we only have one of those rules by name

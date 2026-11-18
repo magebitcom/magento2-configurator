@@ -34,6 +34,10 @@ use PHPUnit\Framework\TestCase;
 
 class WebsitesTest extends TestCase
 {
+    private \Magento\Store\Model\ResourceModel\Store $storeResource;
+    private \Magento\Store\Model\ResourceModel\Group $groupResource;
+    private \Magento\Store\Model\ResourceModel\Website $websiteResource;
+    private \Magento\Store\Model\ResourceModel\Website\CollectionFactory $websiteCollectionFactory;
     private IndexerFactory&MockObject $indexer;
     private ManagerInterface&MockObject $eventManager;
     private WebsiteFactory&MockObject $websiteFactory;
@@ -44,6 +48,10 @@ class WebsitesTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->storeResource = $this->createMock(\Magento\Store\Model\ResourceModel\Store::class);
+        $this->groupResource = $this->createMock(\Magento\Store\Model\ResourceModel\Group::class);
+        $this->websiteResource = $this->createMock(\Magento\Store\Model\ResourceModel\Website::class);
+        $this->websiteCollectionFactory = $this->createMock(\Magento\Store\Model\ResourceModel\Website\CollectionFactory::class);
         $this->indexer = $this->getMockBuilder(IndexerFactory::class)
             ->disableOriginalConstructor()
             ->onlyMethods(['create'])
@@ -75,18 +83,22 @@ class WebsitesTest extends TestCase
             $this->storeFactory,
             $this->groupFactory,
             $this->log,
-            $gate
+            $gate,
+            websiteCollectionFactory: $this->websiteCollectionFactory,
+            websiteResource: $this->websiteResource,
+            groupResource: $this->groupResource,
+            storeResource: $this->storeResource
         );
     }
 
     public function testCreatesFullHierarchyWhenNothingExists(): void
     {
         // Nothing exists: website, group, store view all load empty (getId null).
-        $websiteResource = $this->createMock(WebsiteResource::class);
+        $websiteResource = $this->websiteResource;
         $websiteResource->expects($this->once())->method('save');
         $website = $this->givenWebsite(null, ['name' => 'Main Website'], $websiteResource);
 
-        $groupResource = $this->createMock(GroupResource::class);
+        $groupResource = $this->groupResource;
         // Saved once on create + once when (re)pointing the default store.
         $groupResource->expects($this->exactly(2))->method('save');
         // New group: getId stays falsy (null) throughout creation.
@@ -94,7 +106,7 @@ class WebsitesTest extends TestCase
         $group->method('getId')->willReturn(null);
         $group->method('getDefaultStoreId')->willReturn(null);
 
-        $storeResource = $this->createMock(StoreResource::class);
+        $storeResource = $this->storeResource;
         $storeResource->expects($this->once())->method('save');
         // New store: no existing group id, so it matches the new group's null id (no repoint).
         $storeView = $this->givenStore(null, ['name' => 'Default'], $storeResource, null);
@@ -151,7 +163,7 @@ class WebsitesTest extends TestCase
     public function testMaintainModeUpdatesExistingDifferingWebsite(): void
     {
         // Existing website with a name that differs from the source -> maintain updates it.
-        $websiteResource = $this->createMock(WebsiteResource::class);
+        $websiteResource = $this->websiteResource;
         $websiteResource->expects($this->once())->method('save');
         $website = $this->givenWebsite(1, ['name' => 'Old Name'], $websiteResource);
         $this->websiteFactory->method('create')->willReturn($website);
@@ -177,19 +189,19 @@ class WebsitesTest extends TestCase
     public function testDryRunDoesNotPersist(): void
     {
         // Brand-new hierarchy in dry-run: intent recorded, but nothing saved.
-        $websiteResource = $this->createMock(WebsiteResource::class);
+        $websiteResource = $this->websiteResource;
         $websiteResource->expects($this->never())->method('save');
         $website = $this->givenWebsite(null, ['name' => 'Main Website'], $websiteResource);
         $this->websiteFactory->method('create')->willReturn($website);
 
-        $groupResource = $this->createMock(GroupResource::class);
+        $groupResource = $this->groupResource;
         $groupResource->expects($this->never())->method('save');
         $group = $this->givenGroup(null, ['name' => 'Main Store'], $groupResource);
         $group->method('getId')->willReturn(null);
         $group->method('getDefaultStoreId')->willReturn(null);
         $this->groupFactory->method('create')->willReturn($group);
 
-        $storeResource = $this->createMock(StoreResource::class);
+        $storeResource = $this->storeResource;
         $storeResource->expects($this->never())->method('save');
         $storeView = $this->givenStore(null, ['name' => 'Default'], $storeResource, null);
 
@@ -239,7 +251,9 @@ class WebsitesTest extends TestCase
 
         // websiteFactory->create()->getCollection() yields the website list.
         $collectionWebsite = $this->createMock(Website::class);
-        $collectionWebsite->method('getCollection')->willReturn([$website]);
+        $collection = $this->createMock(\Magento\Store\Model\ResourceModel\Website\Collection::class);
+        $collection->method('getIterator')->willReturn(new \ArrayIterator([$website]));
+        $this->websiteCollectionFactory->method('create')->willReturn($collection);
         $this->websiteFactory->method('create')->willReturn($collectionWebsite);
 
         $out = $this->component->export(new ExportContext([], true, null, false));
@@ -272,7 +286,9 @@ class WebsitesTest extends TestCase
         $other->method('getCode')->willReturn('us_site');
 
         $collectionWebsite = $this->createMock(Website::class);
-        $collectionWebsite->method('getCollection')->willReturn([$matching, $other]);
+        $collection = $this->createMock(\Magento\Store\Model\ResourceModel\Website\Collection::class);
+        $collection->method('getIterator')->willReturn(new \ArrayIterator([$matching, $other]));
+        $this->websiteCollectionFactory->method('create')->willReturn($collection);
         $this->websiteFactory->method('create')->willReturn($collectionWebsite);
 
         $out = $this->component->export(new ExportContext([], true, 'eu_', false));

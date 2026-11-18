@@ -29,6 +29,8 @@ use PHPUnit\Framework\TestCase;
 
 class ShippingTableRatesTest extends TestCase
 {
+    private \Magento\Directory\Model\ResourceModel\Region $regionResource;
+    private \Magento\Store\Model\ResourceModel\Website $websiteResource;
     private TablerateFactory&MockObject $tablerateFactory;
     private WebsiteFactory&MockObject $websiteFactory;
     private RegionFactory&MockObject $regionFactory;
@@ -39,6 +41,8 @@ class ShippingTableRatesTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->regionResource = $this->createMock(\Magento\Directory\Model\ResourceModel\Region::class);
+        $this->websiteResource = $this->createMock(\Magento\Store\Model\ResourceModel\Website::class);
         $this->tablerateFactory = $this->getMockBuilder(TablerateFactory::class)
             ->disableOriginalConstructor()
             ->onlyMethods(['create'])
@@ -63,7 +67,9 @@ class ShippingTableRatesTest extends TestCase
             $this->tablerateFactory,
             $this->websiteFactory,
             $this->regionFactory,
-            $this->log
+            $this->log,
+            websiteResource: $this->websiteResource,
+            regionResource: $this->regionResource
         );
     }
 
@@ -86,7 +92,7 @@ class ShippingTableRatesTest extends TestCase
                         && !array_key_exists('dest_region_code', $row)
                         && !array_key_exists('website_code', $row);
                 }),
-                $this->isType('array')
+                $this->callback(static fn ($value): bool => is_array($value))
             );
 
         $result = $this->execute([
@@ -117,7 +123,7 @@ class ShippingTableRatesTest extends TestCase
             ->with(
                 'shipping_tablerate',
                 $this->callback(static fn (array $rows): bool => $rows[0]['dest_region_id'] === 0),
-                $this->isType('array')
+                $this->callback(static fn ($value): bool => is_array($value))
             );
 
         $result = $this->execute([
@@ -359,11 +365,9 @@ class ShippingTableRatesTest extends TestCase
     private function givenRegionCode(int $regionId, string $code): void
     {
         // getCode() on Region is a magic data-model getter, so it must be
-        // declared via addMethods(); load()/getId() are real declared methods.
-        $region = $this->getMockBuilder(Region::class)
+        $region = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\RegionStub::class)
             ->disableOriginalConstructor()
-            ->addMethods(['getCode'])
-            ->onlyMethods(['getId', 'load'])
+            ->onlyMethods(['getId', 'load', 'getCode'])
             ->getMock();
         $region->method('getId')->willReturn($regionId);
         $region->method('getCode')->willReturn($code);

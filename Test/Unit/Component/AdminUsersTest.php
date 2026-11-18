@@ -30,6 +30,9 @@ use PHPUnit\Framework\TestCase;
 
 class AdminUsersTest extends TestCase
 {
+    private \Magento\Authorization\Model\ResourceModel\Role $roleResource;
+    private \Magento\Authorization\Model\ResourceModel\Role\CollectionFactory $roleCollectionFactory;
+    private \Magento\User\Model\ResourceModel\User\CollectionFactory $userCollectionFactory;
     private UserFactory&MockObject $userFactory;
     private UserResource&MockObject $userResource;
     private RoleFactory&MockObject $roleFactory;
@@ -38,6 +41,9 @@ class AdminUsersTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->roleResource = $this->createMock(\Magento\Authorization\Model\ResourceModel\Role::class);
+        $this->roleCollectionFactory = $this->createMock(\Magento\Authorization\Model\ResourceModel\Role\CollectionFactory::class);
+        $this->userCollectionFactory = $this->createMock(\Magento\User\Model\ResourceModel\User\CollectionFactory::class);
         $this->userFactory = $this->getMockBuilder(UserFactory::class)
             ->disableOriginalConstructor()
             ->onlyMethods(['create'])
@@ -58,7 +64,10 @@ class AdminUsersTest extends TestCase
             $this->userResource,
             $this->roleFactory,
             $this->log,
-            $gate
+            $gate,
+            userCollectionFactory: $this->userCollectionFactory,
+            roleCollectionFactory: $this->roleCollectionFactory,
+            roleResource: $this->roleResource
         );
     }
 
@@ -276,7 +285,7 @@ class AdminUsersTest extends TestCase
         $collection->method('getIterator')->willReturn(new \ArrayIterator([$user]));
 
         $collectionUser = $this->userMock();
-        $collectionUser->method('getCollection')->willReturn($collection);
+        $this->userCollectionFactory->method('create')->willReturn($collection);
 
         // create() is called for the collection iteration and for each role resolve.
         $role = $this->roleMock();
@@ -316,7 +325,7 @@ class AdminUsersTest extends TestCase
         $collection->method('getFirstItem')->willReturn($dbUser);
 
         $collectionUser = $this->userMock();
-        $collectionUser->method('getCollection')->willReturn($collection);
+        $this->userCollectionFactory->method('create')->willReturn($collection);
         $this->userFactory->method('create')->willReturn($collectionUser);
 
         $role = $this->roleMock();
@@ -394,7 +403,7 @@ class AdminUsersTest extends TestCase
         $collection->method('getFirstItem')->willReturn($role);
 
         $roleModel = $this->roleMock();
-        $roleModel->method('getCollection')->willReturn($collection);
+        $this->roleCollectionFactory->method('create')->willReturn($collection);
 
         $this->roleFactory->method('create')->willReturn($roleModel);
     }
@@ -409,7 +418,7 @@ class AdminUsersTest extends TestCase
         $collection->method('getFirstItem')->willReturn($role);
 
         $roleModel = $this->roleMock();
-        $roleModel->method('getCollection')->willReturn($collection);
+        $this->roleCollectionFactory->method('create')->willReturn($collection);
 
         $this->roleFactory->method('create')->willReturn($roleModel);
     }
@@ -446,7 +455,7 @@ class AdminUsersTest extends TestCase
         $collection->method('addFieldToFilter')->willReturnSelf();
         $collection->method('getFirstItem')->willReturn($existing);
 
-        $probe->method('getCollection')->willReturn($collection);
+        $this->userCollectionFactory->method('create')->willReturn($collection);
     }
 
     /**
@@ -465,16 +474,10 @@ class AdminUsersTest extends TestCase
         $user->method('setInterfaceLocale')->willReturnSelf();
     }
 
-    /**
-     * Build a User mock. setRoleId/getRoleId are Magento magic (getData-backed)
-     * methods not declared on the class, so they must be registered via
-     * addMethods(); the rest are real declared methods on Magento\User\Model\User.
-     */
     private function userMock(): User&MockObject
     {
-        return $this->getMockBuilder(User::class)
+        return $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\UserStub::class)
             ->disableOriginalConstructor()
-            ->addMethods(['getRoleId', 'setRoleId'])
             ->onlyMethods([
                 'getCollection',
                 'load',
@@ -493,20 +496,17 @@ class AdminUsersTest extends TestCase
                 'setPassword',
                 'setInterfaceLocale',
                 'validate',
+                'getRoleId',
+                'setRoleId',
             ])
             ->getMock();
     }
 
-    /**
-     * Build a Role mock. getRoleName is a Magento magic getter not declared on
-     * Magento\Authorization\Model\Role, so it must be registered via addMethods().
-     */
     private function roleMock(): Role&MockObject
     {
-        return $this->getMockBuilder(Role::class)
+        return $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\RoleStub::class)
             ->disableOriginalConstructor()
-            ->addMethods(['getRoleName'])
-            ->onlyMethods(['getCollection', 'load', 'getId'])
+            ->onlyMethods(['getCollection', 'load', 'getId', 'getRoleName'])
             ->getMock();
     }
 }

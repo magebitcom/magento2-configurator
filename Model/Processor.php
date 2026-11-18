@@ -501,7 +501,7 @@ class Processor
     private function getMasterYaml(): array
     {
         // Read master yaml
-        $masterPath = BP . '/app/etc/master.yaml';
+        $masterPath = $this->dir->getRoot() . '/app/etc/master.yaml';
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
         if (!file_exists($masterPath)) {
             throw new ComponentException("Master YAML does not exist. Please create one in $masterPath");
@@ -518,7 +518,7 @@ class Processor
         unset($master['additional_sources']);
 
         foreach ($additionalSources as $additionalSource) {
-           $additionalPath = BP . '/' . $additionalSource;
+           $additionalPath = $this->dir->getRoot() . '/' . $additionalSource;
             if (!file_exists($additionalPath)) {
                 throw new ComponentException("Additional source $additionalSource YAML does not exist.");
             }
@@ -529,7 +529,7 @@ class Processor
             foreach($additional as $key => $value) {
                 foreach($value['sources'] as &$source) {
                     if (str_starts_with($source, './configurator/')) {
-                        $source = str_replace(BP . '/', '', dirname($additionalPath)) . substr($source, 1);
+                        $source = str_replace($this->dir->getRoot() . '/', '', dirname($additionalPath)) . substr($source, 1);
                     }
                 }
 
@@ -649,6 +649,8 @@ class Processor
                 return $this->parseJsonData($sourceData);
             }
         }
+
+        return null;
     }
 
     /**
@@ -661,7 +663,7 @@ class Processor
      */
     private function canParseAndProcess($source): bool
     {
-        $path = BP . '/' . $source;
+        $path = $this->dir->getRoot() . '/' . $source;
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
         if ($this->isSourceRemote($source) === false && !file_exists($path)) {
             throw new ComponentException(
@@ -716,7 +718,7 @@ class Processor
     {
         return ($this->isSourceRemote($source) === true) ?
             $this->getRemoteData($source) :
-            file_get_contents(BP . '/' . $source); // phpcs:ignore Magento2.Functions.DiscouragedFunction
+            file_get_contents($this->dir->getRoot() . '/' . $source); // phpcs:ignore Magento2.Functions.DiscouragedFunction
     }
 
     /**

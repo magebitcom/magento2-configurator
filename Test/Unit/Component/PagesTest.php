@@ -42,6 +42,7 @@ if (!defined('BP')) {
 
 class PagesTest extends TestCase
 {
+    private \Magento\Framework\App\Filesystem\DirectoryList $directoryList;
     private PageRepositoryInterface&MockObject $pageRepository;
     private PageInterfaceFactory&MockObject $pageFactory;
     private StoreRepositoryInterface&MockObject $storeRepository;
@@ -58,6 +59,8 @@ class PagesTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->directoryList = $this->createMock(\Magento\Framework\App\Filesystem\DirectoryList::class);
+        $this->directoryList->method('getRoot')->willReturn(BP);
         $this->pageRepository = $this->createMock(PageRepositoryInterface::class);
         $this->pageFactory = $this->getMockBuilder(PageInterfaceFactory::class)
             ->disableOriginalConstructor()
@@ -106,7 +109,8 @@ class PagesTest extends TestCase
             $this->objectManager,
             $this->resourceConnection,
             $this->metadataPool,
-            $this->emulation
+            $this->emulation,
+            directoryList: $this->directoryList
         );
     }
 
@@ -197,10 +201,9 @@ class PagesTest extends TestCase
         // produced a phantom "Save page" on every run.
         $this->givenPageLookup(55);
 
-        $page = $this->getMockBuilder(Page::class)
+        $page = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\PageStub::class)
             ->disableOriginalConstructor()
-            ->addMethods(['setStores'])
-            ->onlyMethods(['getData', 'getId', 'setData', 'setIdentifier', 'unsetData', 'hasDataChanges'])
+            ->onlyMethods(['getData', 'getId', 'setData', 'setIdentifier', 'unsetData', 'hasDataChanges', 'setStores'])
             ->getMock();
         $data = ['title' => 'Same', 'page_layout' => 'empty', 'is_active' => '1', 'store_id' => ['0']];
         $page->method('getData')->willReturnCallback(static fn (string $key = '') => $data[$key] ?? null);
@@ -239,7 +242,8 @@ class PagesTest extends TestCase
             $this->objectManager,
             $this->resourceConnection,
             $this->metadataPool,
-            $this->emulation
+            $this->emulation,
+            directoryList: $this->directoryList
         );
 
         $this->givenPageLookup(55);
@@ -523,11 +527,9 @@ class PagesTest extends TestCase
     private function givenPageMock(array $data, bool $hasChanges): Page&MockObject
     {
         // setStores() is a Magento magic data-setter (not declared on Page), so it must
-        // be registered via addMethods(); the rest are real declared methods.
-        $page = $this->getMockBuilder(Page::class)
+        $page = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\PageStub::class)
             ->disableOriginalConstructor()
-            ->addMethods(['setStores'])
-            ->onlyMethods(['getData', 'getId', 'setData', 'setIdentifier', 'unsetData', 'hasDataChanges'])
+            ->onlyMethods(['getData', 'getId', 'setData', 'setIdentifier', 'unsetData', 'hasDataChanges', 'setStores'])
             ->getMock();
         $page->method('getData')->willReturnCallback(
             static fn (string $key = '') => $data[$key] ?? null

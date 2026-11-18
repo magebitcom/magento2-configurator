@@ -33,6 +33,8 @@ use PHPUnit\Framework\TestCase;
 
 class ConfigTest extends TestCase
 {
+    private \Magento\Store\Model\ResourceModel\Store $storeResource;
+    private \Magento\Store\Model\ResourceModel\Website $websiteResource;
     private ConfigResource&MockObject $configResource;
     private ScopeConfig&MockObject $scopeConfig;
     private ScopeConfig\Initial&MockObject $initialConfig;
@@ -47,6 +49,8 @@ class ConfigTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->storeResource = $this->createMock(\Magento\Store\Model\ResourceModel\Store::class);
+        $this->websiteResource = $this->createMock(\Magento\Store\Model\ResourceModel\Website::class);
         $this->configResource = $this->createMock(ConfigResource::class);
         $this->scopeConfig = $this->createMock(ScopeConfig::class);
         $this->initialConfig = $this->createMock(ScopeConfig\Initial::class);
@@ -87,7 +91,9 @@ class ConfigTest extends TestCase
             $this->storeFactory,
             $this->log,
             $gate,
-            $this->configValueFactory
+            $this->configValueFactory,
+            websiteResource: $this->websiteResource,
+            storeResource: $this->storeResource
         );
     }
 
@@ -499,7 +505,9 @@ class ConfigTest extends TestCase
             $this->storeFactory,
             $this->log,
             $gate,
-            $this->configValueFactory
+            $this->configValueFactory,
+            websiteResource: $this->websiteResource,
+            storeResource: $this->storeResource
         );
     }
 }

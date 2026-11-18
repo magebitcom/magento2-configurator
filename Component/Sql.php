@@ -15,6 +15,7 @@ use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Component\Processor\SqlSplitProcessor;
 use Magebit\Configurator\Model\ComponentContext;
 use Magebit\Configurator\Model\ComponentResult;
+use Magento\Framework\App\Filesystem\DirectoryList as DirectoryList;
 
 /**
  * Class Sql - Runs raw SQL queries - generally a fallback for when a configurator component is not available.
@@ -26,7 +27,8 @@ class Sql implements ComponentInterface
 
     public function __construct(
         private readonly SqlSplitProcessor $processor,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly DirectoryList $directoryList
     ) {
     }
 
@@ -42,7 +44,7 @@ class Sql implements ComponentInterface
 
         $this->log->logInfo('Beginning of custom queries configuration:');
         foreach ($data['sql'] as $name => $sqlFile) {
-            $path = BP . '/' . $sqlFile;
+            $path = $this->directoryList->getRoot() . '/' . $sqlFile;
             // phpcs:ignore Magento2.Functions.DiscouragedFunction
             if (false === file_exists($path)) {
                 $this->log->logError("{$path} does not exist. Skipping.");

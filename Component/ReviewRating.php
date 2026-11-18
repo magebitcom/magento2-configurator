@@ -27,6 +27,7 @@ use Magento\Review\Model\Rating\EntityFactory;
 use Magento\Store\Api\StoreRepositoryInterface;
 use Magento\Review\Model\Rating\Option;
 use Magento\Review\Model\Rating\OptionFactory;
+use Magento\Review\Model\ResourceModel\Rating\CollectionFactory as RatingCollectionFactory;
 
 /**
  * @SuppressWarnings("CouplingBetweenObjects")
@@ -49,7 +50,8 @@ class ReviewRating implements ComponentInterface, ExportableComponentInterface
         private readonly RatingResource $ratingResource,
         private readonly RatingOptionResource $optionResource,
         private readonly LoggerInterface $log,
-        private readonly ReconciliationGate $gate
+        private readonly ReconciliationGate $gate,
+        private readonly RatingCollectionFactory $ratingCollectionFactory
     ) {
     }
 
@@ -145,7 +147,7 @@ class ReviewRating implements ComponentInterface, ExportableComponentInterface
     {
         /** @var Rating $rating */
         $rating = $this->ratingFactory->create();
-        $rating->load($reviewRatingCode, 'rating_code');
+        $this->ratingResource->load($rating, $reviewRatingCode, 'rating_code');
         return $rating;
     }
 
@@ -339,7 +341,7 @@ class ReviewRating implements ComponentInterface, ExportableComponentInterface
     private function exportAll(?string $filter): array
     {
         /** @var \Magento\Review\Model\ResourceModel\Rating\Collection $collection */
-        $collection = $this->ratingFactory->create()->getCollection();
+        $collection = $this->ratingCollectionFactory->create();
         $collection->addEntityFilter($this->getReviewEntityId());
 
         $out = [];

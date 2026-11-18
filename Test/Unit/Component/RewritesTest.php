@@ -28,6 +28,7 @@ use PHPUnit\Framework\TestCase;
 
 class RewritesTest extends TestCase
 {
+    private \Magento\UrlRewrite\Model\ResourceModel\UrlRewriteCollectionFactory $urlRewriteCollectionFactory;
     private UrlPersistInterface&MockObject $urlPersist;
     private UrlRewriteFactory&MockObject $urlRewriteFactory;
     private UrlRewriteResource&MockObject $urlRewriteResource;
@@ -36,6 +37,7 @@ class RewritesTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->urlRewriteCollectionFactory = $this->createMock(\Magento\UrlRewrite\Model\ResourceModel\UrlRewriteCollectionFactory::class);
         $this->urlPersist = $this->createMock(UrlPersistInterface::class);
         $this->urlRewriteFactory = $this->getMockBuilder(UrlRewriteFactory::class)
             ->disableOriginalConstructor()
@@ -54,7 +56,8 @@ class RewritesTest extends TestCase
             $this->urlRewriteFactory,
             $this->urlRewriteResource,
             $this->log,
-            $gate
+            $gate,
+            urlRewriteCollectionFactory: $this->urlRewriteCollectionFactory
         );
     }
 
@@ -131,7 +134,8 @@ class RewritesTest extends TestCase
             $this->urlRewriteFactory,
             $this->urlRewriteResource,
             $this->log,
-            $gate
+            $gate,
+            urlRewriteCollectionFactory: $this->urlRewriteCollectionFactory
         );
 
         $existing = $this->makeUrlRewriteMock($this->setterMethods());
@@ -396,20 +400,11 @@ class RewritesTest extends TestCase
         ];
     }
 
-    /**
-     * Build a UrlRewrite mock. UrlRewrite exposes its request/target/store/etc
-     * accessors as Magento magic methods (data-model backed), so they are not
-     * declared on the class and must be wired via addMethods(); getCollection()
-     * and getId() are real declared methods on AbstractModel.
-     *
-     * @param string[] $magicMethods
-     */
     private function makeUrlRewriteMock(array $magicMethods = []): UrlRewrite&MockObject
     {
-        return $this->getMockBuilder(UrlRewrite::class)
+        return $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\UrlRewriteStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['getCollection', 'getId'])
-            ->addMethods($magicMethods)
+            ->onlyMethods(array_merge(['getCollection', 'getId'], $magicMethods))
             ->getMock();
     }
 
@@ -459,7 +454,7 @@ class RewritesTest extends TestCase
         $collection->method('getFirstItem')->willReturn($firstItem ?? $this->makeUrlRewriteMock($this->setterMethods()));
 
         $rewrite = $this->makeUrlRewriteMock($this->setterMethods());
-        $rewrite->method('getCollection')->willReturn($collection);
+        $this->urlRewriteCollectionFactory->method('create')->willReturn($collection);
 
         return $rewrite;
     }
@@ -503,15 +498,15 @@ class RewritesTest extends TestCase
      */
     private function givenLoadResults(array $records): void
     {
-        $wrappers = [];
+        $collections = [];
         foreach ($records as $record) {
             $collection = $this->createMock(Collection::class);
             $collection->method('addFieldToFilter')->willReturnSelf();
             $collection->method('getFirstItem')->willReturn($record);
-            $wrappers[] = $this->wrapCollection($collection);
+            $collections[] = $collection;
         }
 
-        $this->urlRewriteFactory->method('create')->willReturn(...$wrappers);
+        $this->urlRewriteCollectionFactory->method('create')->willReturn(...$collections);
     }
 
     /**
@@ -521,7 +516,7 @@ class RewritesTest extends TestCase
     private function wrapCollection(Collection&MockObject $collection): UrlRewrite&MockObject
     {
         $rewrite = $this->createMock(UrlRewrite::class);
-        $rewrite->method('getCollection')->willReturn($collection);
+        $this->urlRewriteCollectionFactory->method('create')->willReturn($collection);
 
         return $rewrite;
     }

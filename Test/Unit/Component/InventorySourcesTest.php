@@ -372,10 +372,9 @@ class InventorySourcesTest extends TestCase
      */
     private function createSourceMock(): SourceInterface&MockObject
     {
-        return $this->getMockBuilder(SourceInterface::class)
+        return $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\SourceInterfaceStub::class)
             ->disableOriginalConstructor()
-            ->addMethods(['getData', 'setData'])
-            ->getMockForAbstractClass();
+            ->getMock();
     }
 
     /**
@@ -383,10 +382,9 @@ class InventorySourcesTest extends TestCase
      */
     private function createStockMock(): StockInterface&MockObject
     {
-        return $this->getMockBuilder(StockInterface::class)
+        return $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\StockInterfaceStub::class)
             ->disableOriginalConstructor()
-            ->addMethods(['getData', 'setData'])
-            ->getMockForAbstractClass();
+            ->getMock();
     }
 
     private function givenNoExistingStock(): void

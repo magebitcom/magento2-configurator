@@ -98,7 +98,6 @@ class ConfigTest extends TestCase
         // method returns that mock's class. The registered name is the meaningful
         // contract, so we read the protected _resourceName the model recorded.
         $reflection = new \ReflectionProperty(\Magento\Framework\Model\AbstractModel::class, '_resourceName');
-        $reflection->setAccessible(true);
 
         $this->assertSame(
             \Magebit\Configurator\Model\ResourceModel\ConfigResource::class,

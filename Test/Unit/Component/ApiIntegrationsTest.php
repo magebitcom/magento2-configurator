@@ -32,6 +32,7 @@ use PHPUnit\Framework\TestCase;
 
 class ApiIntegrationsTest extends TestCase
 {
+    private \Magento\Integration\Model\ResourceModel\Integration\CollectionFactory $integrationCollectionFactory;
     private IntegrationFactory&MockObject $integrationFactory;
     private IntegrationServiceInterface&MockObject $integrationService;
     private AuthorizationService&MockObject $authorizationService;
@@ -42,6 +43,7 @@ class ApiIntegrationsTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->integrationCollectionFactory = $this->createMock(\Magento\Integration\Model\ResourceModel\Integration\CollectionFactory::class);
         $this->integrationFactory = $this->getMockBuilder(IntegrationFactory::class)
             ->disableOriginalConstructor()
             ->onlyMethods(['create'])
@@ -67,7 +69,8 @@ class ApiIntegrationsTest extends TestCase
             $this->tokenFactory,
             $this->tokenResource,
             $this->log,
-            $gate
+            $gate,
+            integrationCollectionFactory: $this->integrationCollectionFactory
         );
     }
 
@@ -76,11 +79,9 @@ class ApiIntegrationsTest extends TestCase
         $this->givenLookupReturnsId(null);
 
         // Created integration mints a token (creation only).
-        // getConsumerId is a magic data getter, not a declared method -> addMethods().
-        $created = $this->getMockBuilder(IntegrationModel::class)
+        $created = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\IntegrationStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['getId'])
-            ->addMethods(['getConsumerId'])
+            ->onlyMethods(['getId', 'getConsumerId'])
             ->getMock();
         $created->method('getId')->willReturn(42);
         $created->method('getConsumerId')->willReturn(7);
@@ -93,11 +94,9 @@ class ApiIntegrationsTest extends TestCase
             ->method('grantPermissions')
             ->with(42, ['Magento_Backend::admin']);
 
-        // setType is a magic data setter -> addMethods(); createVerifierToken is declared.
-        $token = $this->getMockBuilder(Token::class)
+        $token = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\TokenStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['createVerifierToken'])
-            ->addMethods(['setType'])
+            ->onlyMethods(['createVerifierToken', 'setType'])
             ->getMock();
         $token->expects($this->once())->method('createVerifierToken')->with(7);
         $token->expects($this->once())->method('setType')->with('access');
@@ -260,7 +259,7 @@ class ApiIntegrationsTest extends TestCase
         $collection->expects($this->never())->method('addFieldToFilter');
 
         $factoryModel = $this->createMock(IntegrationModel::class);
-        $factoryModel->method('getCollection')->willReturn($collection);
+        $this->integrationCollectionFactory->method('create')->willReturn($collection);
         $this->integrationFactory->method('create')->willReturn($factoryModel);
 
         $this->integrationService->method('getSelectedResources')
@@ -297,7 +296,7 @@ class ApiIntegrationsTest extends TestCase
         $byNameCollection->method('getFirstItem')->willReturn($integration);
 
         $factoryModel = $this->createMock(IntegrationModel::class);
-        $factoryModel->method('getCollection')->willReturn($byNameCollection);
+        $this->integrationCollectionFactory->method('create')->willReturn($byNameCollection);
         $this->integrationFactory->method('create')->willReturn($factoryModel);
 
         $this->integrationService->method('getSelectedResources')
@@ -332,7 +331,7 @@ class ApiIntegrationsTest extends TestCase
         $byNameCollection->method('getFirstItem')->willReturn($missing);
 
         $factoryModel = $this->createMock(IntegrationModel::class);
-        $factoryModel->method('getCollection')->willReturn($byNameCollection);
+        $this->integrationCollectionFactory->method('create')->willReturn($byNameCollection);
         $this->integrationFactory->method('create')->willReturn($factoryModel);
 
         $this->integrationService->expects($this->never())->method('getSelectedResources');
@@ -393,7 +392,7 @@ class ApiIntegrationsTest extends TestCase
         $collection->method('getFirstItem')->willReturn($existing);
 
         $factoryModel = $this->createMock(IntegrationModel::class);
-        $factoryModel->method('getCollection')->willReturn($collection);
+        $this->integrationCollectionFactory->method('create')->willReturn($collection);
         $this->integrationFactory->method('create')->willReturn($factoryModel);
     }
 
@@ -404,11 +403,9 @@ class ApiIntegrationsTest extends TestCase
         string $identityUrl
     ): IntegrationModel&MockObject {
         // getName/getEmail/getEndpoint/getIdentityLinkUrl are magic data getters,
-        // not declared methods -> addMethods(); getId is declared on AbstractModel.
-        $integration = $this->getMockBuilder(IntegrationModel::class)
+        $integration = $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\IntegrationStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['getId'])
-            ->addMethods(['getName', 'getEmail', 'getEndpoint', 'getIdentityLinkUrl'])
+            ->onlyMethods(['getId', 'getName', 'getEmail', 'getEndpoint', 'getIdentityLinkUrl'])
             ->getMock();
         $integration->method('getId')->willReturn(5);
         $integration->method('getName')->willReturn($name);

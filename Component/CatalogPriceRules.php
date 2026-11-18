@@ -19,6 +19,7 @@ use Magebit\Configurator\Model\ComponentResult;
 use Magebit\Configurator\Model\Export\ExportContext;
 use Magento\CatalogRule\Model\Rule;
 use Magento\CatalogRule\Model\RuleFactory;
+use Magento\CatalogRule\Model\ResourceModel\Rule\CollectionFactory as RuleCollectionFactory;
 
 /**
  * Manages Catalog Price Rules by delegating to the CatalogPriceRulesProcessor.
@@ -50,7 +51,8 @@ class CatalogPriceRules implements ComponentInterface, ExportableComponentInterf
     public function __construct(
         private readonly CatalogPriceRulesProcessor $processor,
         private readonly LoggerInterface $log,
-        private readonly RuleFactory $ruleFactory
+        private readonly RuleFactory $ruleFactory,
+        private readonly RuleCollectionFactory $ruleCollectionFactory
     ) {
     }
 
@@ -187,7 +189,7 @@ class CatalogPriceRules implements ComponentInterface, ExportableComponentInterf
      */
     private function exportAll(?string $filter): array
     {
-        $collection = $this->ruleFactory->create()->getCollection();
+        $collection = $this->ruleCollectionFactory->create();
 
         if ($filter !== null && $filter !== '') {
             $collection->addFieldToFilter('name', ['like' => $filter . '%']);
@@ -210,7 +212,7 @@ class CatalogPriceRules implements ComponentInterface, ExportableComponentInterf
      */
     private function findRuleByName(string $name): ?Rule
     {
-        $collection = $this->ruleFactory->create()->getCollection()
+        $collection = $this->ruleCollectionFactory->create()
             ->addFieldToFilter('name', $name);
 
         if ($collection->getSize() !== 1) {

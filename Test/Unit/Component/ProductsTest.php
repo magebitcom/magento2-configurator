@@ -31,6 +31,7 @@ use PHPUnit\Framework\TestCase;
 
 class ProductsTest extends TestCase
 {
+    private \Magento\Catalog\Model\ResourceModel\Product $productResource;
     private ImporterFactory&MockObject $importerFactory;
     private ProductFactory&MockObject $productFactory;
     private Image&MockObject $image;
@@ -44,6 +45,7 @@ class ProductsTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->productResource = $this->createMock(\Magento\Catalog\Model\ResourceModel\Product::class);
         $this->importerFactory = $this->getMockBuilder(ImporterFactory::class)
             ->disableOriginalConstructor()
             ->onlyMethods(['create'])
@@ -82,7 +84,8 @@ class ProductsTest extends TestCase
             $this->log,
             $this->productCollectionFactory,
             $this->sourceItemFactory,
-            $this->sourceItemsSave
+            $this->sourceItemsSave,
+            productResource: $this->productResource
         );
     }
 
@@ -117,6 +120,24 @@ class ProductsTest extends TestCase
 
         $this->assertTrue($result->isSuccessful());
         $this->assertSame(0, $result->getSkipped());
+    }
+
+    public function testLogsImporterCreationFailureWithoutReadingAnUndefinedImporter(): void
+    {
+        $this->givenNoExistingSkus();
+        $importer = $this->givenImporterPassesThrough(failToCreate: true);
+        $importer->expects($this->never())->method('processImport');
+        $importer->expects($this->never())->method('getLogTrace');
+        $importer->expects($this->never())->method('getErrorMessages');
+        $this->log->expects($this->once())->method('logError')->with('Cannot create importer');
+
+        $result = $this->execute(
+            $this->csv(['sku', 'name'], [['widget-1', 'Widget One']]),
+            false,
+            ComponentMode::Maintain
+        );
+
+        $this->assertTrue($result->isSuccessful());
     }
 
     public function testSkipsRowWithWrongColumnCount(): void
@@ -290,13 +311,25 @@ class ProductsTest extends TestCase
      * Wire the importer + validator so the prepared rows pass straight through
      * to processImport() unchanged. Returns the Importer mock for assertions.
      */
-    private function givenImporterPassesThrough(): Importer&MockObject
+    private function givenImporterPassesThrough(bool $failToCreate = false): Importer&MockObject
     {
         $importer = $this->createMock(Importer::class);
         $importer->method('setMultipleValueSeparator')->willReturnSelf();
         $importer->method('getLogTrace')->willReturn('');
         $importer->method('getErrorMessages')->willReturn('');
-        $this->importerFactory->method('create')->willReturn($importer);
+        if ($failToCreate) {
+            $calls = 0;
+            $this->importerFactory->method('create')->willReturnCallback(
+                static function () use ($importer, &$calls): Importer {
+                    if ($calls++ > 0) {
+                        throw new \RuntimeException('Cannot create importer');
+                    }
+                    return $importer;
+                }
+            );
+        } else {
+            $this->importerFactory->method('create')->willReturn($importer);
+        }
 
         $validator = $this->createMock(Validator::class);
         $validator->method('getValidatedImport')->willReturnCallback(

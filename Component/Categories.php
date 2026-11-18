@@ -29,6 +29,8 @@ use Magento\Framework\App\Filesystem\DirectoryList;
 use Magento\Framework\Exception\FileSystemException;
 use Magento\Store\Model\Group;
 use Magento\Store\Model\GroupFactory;
+use Magento\Store\Model\ResourceModel\Group\CollectionFactory as GroupCollectionFactory;
+use Magento\Catalog\Model\ResourceModel\Category\CollectionFactory as CategoryCollectionFactory;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
@@ -72,7 +74,9 @@ class Categories implements ComponentInterface, ExportableComponentInterface
         private readonly BlockFactory $blockFactory,
         private readonly BlockResource $blockResource,
         private readonly CategoryResource $categoryResource,
-        private readonly ReconciliationGate $gate
+        private readonly ReconciliationGate $gate,
+        private readonly GroupCollectionFactory $groupCollectionFactory,
+        private readonly CategoryCollectionFactory $categoryCollectionFactory
     ) {
     }
 
@@ -121,14 +125,16 @@ class Categories implements ComponentInterface, ExportableComponentInterface
      */
     public function getDefaultCategory(?string $store = null): Category|bool
     {
-        $groupCollection = $this->groupFactory->create()->getCollection()
+        $groupCollection = $this->groupCollectionFactory->create()
             ->addFieldToFilter('name', $store);
         if ($groupCollection->getSize() === 1) {
             /**
              * @var $group Group
              */
             $group = $groupCollection->getFirstItem();
-            return $this->category->create()->load($group->getRootCategoryId());
+            $category = $this->category->create();
+            $this->categoryResource->load($category, $group->getRootCategoryId());
+            return $category;
         }
         if ($groupCollection->getSize() > 1) {
             throw new ComponentException(
@@ -167,7 +173,7 @@ class Categories implements ComponentInterface, ExportableComponentInterface
             /**
              * @var $category Category
              */
-            $category = $this->category->create()->getCollection()
+            $category = $this->categoryCollectionFactory->create()
                 ->addAttributeToSelect('*')
                 ->addFieldToFilter('name', $categoryValues['name'])
                 ->addFieldToFilter('parent_id', $parentCategory->getId())
@@ -231,7 +237,7 @@ class Categories implements ComponentInterface, ExportableComponentInterface
                         $catMediaDir = $this->dirList->getPath('media') . '/' . 'catalog' . '/' . 'category' . '/';
 
                         if (!array_key_exists('host', $path)) {
-                            $value = BP . '/' . trim((string) $value, '/');
+                            $value = $this->dirList->getRoot() . '/' . trim((string) $value, '/');
                         }
 
                         // phpcs:ignore
@@ -267,7 +273,7 @@ class Categories implements ComponentInterface, ExportableComponentInterface
             if ($category->getId()) {
                 $path = $path . '/';
             }
-            $category->setAttributeSetId($category->getResource()->getEntityType()->getDefaultAttributeSetId());
+            $category->setAttributeSetId($this->categoryResource->getEntityType()->getDefaultAttributeSetId());
             $category->setPath($path);
             $category->setParentId($parentCategory->getId());
             // Update category in default scope
@@ -417,7 +423,7 @@ class Categories implements ComponentInterface, ExportableComponentInterface
     private function exportAllGroups(?string $filter): array
     {
         $out = [];
-        foreach ($this->groupFactory->create()->getCollection() as $group) {
+        foreach ($this->groupCollectionFactory->create() as $group) {
             $name = (string) $group->getName();
             if ($filter !== null && $filter !== '' && !str_starts_with($name, $filter)) {
                 continue;
@@ -477,7 +483,9 @@ class Categories implements ComponentInterface, ExportableComponentInterface
                     $categories[] = $tracked;
                     continue;
                 }
-                $categories[] = $this->buildCategoryEntry($this->category->create()->load($categoryId), $tracked);
+                $category = $this->category->create();
+                $this->categoryResource->load($category, $categoryId);
+                $categories[] = $this->buildCategoryEntry($category, $tracked);
             }
 
             $rebuilt = $groupEntry;
@@ -533,7 +541,7 @@ class Categories implements ComponentInterface, ExportableComponentInterface
      */
     private function exportChildren(int $parentId): array
     {
-        $collection = $this->category->create()->getCollection()
+        $collection = $this->categoryCollectionFactory->create()
             ->addAttributeToSelect('*')
             ->addFieldToFilter('parent_id', $parentId)
             ->setOrder('position', 'ASC');
@@ -548,7 +556,7 @@ class Categories implements ComponentInterface, ExportableComponentInterface
 
     private function findChildByName(string $name, int $parentId): ?int
     {
-        $category = $this->category->create()->getCollection()
+        $category = $this->categoryCollectionFactory->create()
             ->addAttributeToSelect('name')
             ->addFieldToFilter('name', $name)
             ->addFieldToFilter('parent_id', $parentId)

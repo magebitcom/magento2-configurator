@@ -27,6 +27,7 @@ use Magebit\Configurator\Model\ComponentResult;
 use Magebit\Configurator\Model\Export\ExportContext;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationGate;
 use Magebit\Configurator\Model\Reconciliation\ReconciliationRequest;
+use Magento\Integration\Model\ResourceModel\Integration\CollectionFactory as IntegrationCollectionFactory;
 
 /**
  * @SuppressWarnings(PHPMD.ShortVariable)
@@ -43,7 +44,8 @@ class ApiIntegrations implements ComponentInterface, ExportableComponentInterfac
         private readonly TokenFactory $tokenFactory,
         private readonly TokenResource $tokenResource,
         private readonly LoggerInterface $log,
-        private readonly ReconciliationGate $gate
+        private readonly ReconciliationGate $gate,
+        private readonly IntegrationCollectionFactory $integrationCollectionFactory
     ) {
     }
 
@@ -81,7 +83,7 @@ class ApiIntegrations implements ComponentInterface, ExportableComponentInterfac
         ComponentResult $result
     ): void {
         $integration = $this->integrationFactory->create();
-        $existing = $integration->getCollection()
+        $existing = $this->integrationCollectionFactory->create()
             ->addFieldToFilter('name', $integrationData['name'])
             ->getFirstItem();
         $exists = (bool) $existing->getId();
@@ -271,7 +273,7 @@ class ApiIntegrations implements ComponentInterface, ExportableComponentInterfac
      */
     private function exportAll(?string $filter): array
     {
-        $collection = $this->integrationFactory->create()->getCollection();
+        $collection = $this->integrationCollectionFactory->create();
         if ($filter !== null && $filter !== '') {
             $collection->addFieldToFilter('name', ['like' => $filter . '%']);
         }
@@ -313,7 +315,7 @@ class ApiIntegrations implements ComponentInterface, ExportableComponentInterfac
      */
     private function findByName(string $name): ?IntegrationModel
     {
-        $integration = $this->integrationFactory->create()->getCollection()
+        $integration = $this->integrationCollectionFactory->create()
             ->addFieldToFilter('name', $name)
             ->getFirstItem();
 

@@ -15,6 +15,7 @@ use Magebit\Configurator\Api\ExportableComponentInterface;
 use Magebit\Configurator\Api\LoggerInterface;
 use Magebit\Configurator\Exception\ComponentException;
 use Symfony\Component\Yaml\Yaml;
+use Magento\Framework\App\Filesystem\DirectoryList as DirectoryList;
 
 /**
  * Reverses configurator components: reads the current DB state via each
@@ -34,7 +35,8 @@ class Exporter
 
     public function __construct(
         private readonly ComponentListInterface $componentList,
-        private readonly LoggerInterface $log
+        private readonly LoggerInterface $log,
+        private readonly DirectoryList $directoryList
     ) {
     }
 
@@ -145,7 +147,7 @@ class Exporter
      */
     private function readMaster(): array
     {
-        $path = BP . '/' . self::MASTER_PATH;
+        $path = $this->directoryList->getRoot() . '/' . self::MASTER_PATH;
         // phpcs:ignore Magento2.Functions.DiscouragedFunction
         if (!file_exists($path)) {
             throw new ComponentException(sprintf('Master YAML does not exist at %s', $path));
@@ -158,7 +160,7 @@ class Exporter
 
     private function resolvePath(string $source): string
     {
-        return BP . '/' . ltrim($source, '/');
+        return $this->directoryList->getRoot() . '/' . ltrim($source, '/');
     }
 
     /**
@@ -183,7 +185,7 @@ class Exporter
         $folder = str_replace(' ', '', ucwords(str_replace('_', ' ', $alias)));
         $ext = in_array($alias, self::CSV_ALIASES, true) ? 'csv' : 'yaml';
 
-        return BP . '/app/etc/configurator/' . $folder . '/' . $alias . '.' . $ext;
+        return $this->directoryList->getRoot() . '/app/etc/configurator/' . $folder . '/' . $alias . '.' . $ext;
     }
 
     /**

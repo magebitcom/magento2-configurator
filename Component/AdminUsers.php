@@ -25,6 +25,9 @@ use Magento\Authorization\Model\RoleFactory;
 use Magento\Framework\Validator\Exception as ValidatorException;
 use Magento\User\Model\ResourceModel\User as UserResource;
 use Magento\User\Model\UserFactory;
+use Magento\User\Model\ResourceModel\User\CollectionFactory as UserCollectionFactory;
+use Magento\Authorization\Model\ResourceModel\Role\CollectionFactory as RoleCollectionFactory;
+use Magento\Authorization\Model\ResourceModel\Role as RoleResource;
 
 /**
  * Creates admin users and assigns them to a role, from configurator YAML.
@@ -43,7 +46,10 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
         private readonly UserResource $userResource,
         private readonly RoleFactory $roleFactory,
         private readonly LoggerInterface $log,
-        private readonly ReconciliationGate $gate
+        private readonly ReconciliationGate $gate,
+        private readonly UserCollectionFactory $userCollectionFactory,
+        private readonly RoleCollectionFactory $roleCollectionFactory,
+        private readonly RoleResource $roleResource
     ) {
     }
 
@@ -113,7 +119,7 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
         $fullName = $userData['firstname'] . ' ' . $userData['secondname'];
 
         $user = $this->userFactory->create();
-        $existing = $user->getCollection()->addFieldToFilter('email', $userData['email'])->getFirstItem();
+        $existing = $this->userCollectionFactory->create()->addFieldToFilter('email', $userData['email'])->getFirstItem();
         $exists = (bool) $existing->getId();
 
         $version = $userData['version'] ?? null;
@@ -148,7 +154,10 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
         }
 
         $isCreate = $outcome === ReconciliationOutcome::Create;
-        $user = $isCreate ? $user : $this->userFactory->create()->load($existing->getId());
+        if (!$isCreate) {
+            $user = $this->userFactory->create();
+            $this->userResource->load($user, $existing->getId());
+        }
 
         $this->log->logInfo(sprintf('Admin User "%s" (%s) being %s', $fullName, $userData['email'], $outcome->value));
 
@@ -200,7 +209,7 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
             return;
         }
 
-        $existing = $this->userFactory->create()->getCollection()
+        $existing = $this->userCollectionFactory->create()
             ->addFieldToFilter('email', $email)
             ->getFirstItem();
 
@@ -225,8 +234,7 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
      */
     private function getUserRoleFromName(string $roleName): ?int
     {
-        $role = $this->roleFactory->create()
-            ->getCollection()
+        $role = $this->roleCollectionFactory->create()
             ->addFieldToFilter('role_name', $roleName)
             ->getFirstItem();
 
@@ -398,7 +406,7 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
         $grouped = [];
         $order = [];
 
-        foreach ($this->userFactory->create()->getCollection() as $user) {
+        foreach ($this->userCollectionFactory->create() as $user) {
             $roleName = $this->getRoleNameForUser($user);
             if ($roleName === null) {
                 continue;
@@ -457,7 +465,7 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
      */
     private function loadUserByEmail(string $email)
     {
-        $user = $this->userFactory->create()->getCollection()
+        $user = $this->userCollectionFactory->create()
             ->addFieldToFilter('email', $email)
             ->getFirstItem();
 
@@ -480,7 +488,8 @@ class AdminUsers implements ComponentInterface, ExportableComponentInterface
             return null;
         }
 
-        $role = $this->roleFactory->create()->load((int) $roleId);
+        $role = $this->roleFactory->create();
+        $this->roleResource->load($role, (int) $roleId);
 
         return $role->getId() ? (string) $role->getRoleName() : null;
     }

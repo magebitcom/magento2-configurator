@@ -422,10 +422,9 @@ class OrderStatusesTest extends TestCase
      */
     private function newStatusMock(): Status&MockObject
     {
-        return $this->getMockBuilder(Status::class)
+        return $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\StatusStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['setData', 'assignState', 'getResourceCollection'])
-            ->addMethods(['getStatus', 'getLabel', 'getState'])
+            ->onlyMethods(['setData', 'assignState', 'getResourceCollection', 'getStatus', 'getLabel', 'getState'])
             ->getMock();
     }
 

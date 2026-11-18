@@ -30,6 +30,8 @@ use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\ObjectManagerInterface;
 use Magento\Store\Model\Store;
 use Symfony\Component\Filesystem\Filesystem;
+use Magento\Store\Model\ResourceModel\Store as StoreResource;
+use Magento\Framework\App\Filesystem\DirectoryList as DirectoryList;
 
 class Blocks implements ComponentInterface, ExportableComponentInterface
 {
@@ -49,7 +51,9 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
         private readonly Filesystem $filesystem,
         private readonly Escaper $escaper,
         private readonly ReconciliationGate $gate,
-        private readonly ObjectManagerInterface $objectManager
+        private readonly ObjectManagerInterface $objectManager,
+        private readonly StoreResource $storeResource,
+        private readonly DirectoryList $directoryList
     ) {
         if (class_exists('Hyva\Theme\Model\ViewModelRegistry')) {
             $this->viewModelRegistry = $this->objectManager->create('Hyva\Theme\Model\ViewModelRegistry');
@@ -172,7 +176,7 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
                     if ($key == "source") {
                         $key = 'content';
 
-                        $file = BP . '/' . $value;
+                        $file = $this->directoryList->getRoot() . '/' . $value;
 
                         if (!$this->filesystem->exists($file)) {
                             return;
@@ -348,7 +352,8 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
     private function getStoreByCode(string $code): Store
     {
         // Load the store object
-        $store = $this->storeManager->load($code, 'code');
+        $store = $this->storeManager;
+        $this->storeResource->load($store, $code, 'code');
 
         // Check if we get back a store ID.
         if (!$store->getId()) {
@@ -461,7 +466,7 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
      */
     private function writeSourceContent(string $source, string $content, bool $dryRun): void
     {
-        $path = BP . '/' . ltrim($source, '/');
+        $path = $this->directoryList->getRoot() . '/' . ltrim($source, '/');
 
         if ($dryRun) {
             $this->log->logInfo(sprintf('[dry-run] Would write source content to %s', $path));
@@ -558,7 +563,8 @@ class Blocks implements ComponentInterface, ExportableComponentInterface
             if ((int) $storeId === Store::DEFAULT_STORE_ID) {
                 continue;
             }
-            $store = $this->storeManager->load((int) $storeId);
+            $store = $this->storeManager;
+        $this->storeResource->load($store, (int) $storeId);
             if ($store->getId()) {
                 $codes[] = (string) $store->getCode();
             }

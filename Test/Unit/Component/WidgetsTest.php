@@ -39,6 +39,7 @@ use PHPUnit\Framework\TestCase;
 
 class WidgetsTest extends TestCase
 {
+    private \Magento\Store\Model\ResourceModel\Store $storeResource;
     private WidgetCollection&MockObject $widgetCollection;
     private WidgetInstanceFactory&MockObject $widgetFactory;
     private StoreFactory&MockObject $storeFactory;
@@ -54,6 +55,7 @@ class WidgetsTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->storeResource = $this->createMock(\Magento\Store\Model\ResourceModel\Store::class);
         $this->widgetCollection = $this->createMock(WidgetCollection::class);
         $this->widgetFactory = $this->getMockBuilder(WidgetInstanceFactory::class)
             ->disableOriginalConstructor()
@@ -99,7 +101,8 @@ class WidgetsTest extends TestCase
             $this->blockRepository,
             $this->criteriaBuilder,
             $this->widgetResource,
-            $gate
+            $gate,
+            storeResource: $this->storeResource
         );
     }
 
@@ -603,17 +606,11 @@ class WidgetsTest extends TestCase
         $this->widgetResource->method('load')->willReturnArgument(0);
     }
 
-    /**
-     * Mock a widget Instance. Its accessors (getInstanceType/getTitle/getThemeId)
-     * are magic __call methods on the underlying model, so they are registered via
-     * addMethods(); getData/setData/getId/load are real and stay onlyMethods().
-     */
     private function instanceMock(): Instance&MockObject
     {
-        return $this->getMockBuilder(Instance::class)
+        return $this->getMockBuilder(\Magebit\Configurator\Test\Unit\Double\InstanceStub::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['getId', 'getData', 'setData'])
-            ->addMethods(['getInstanceType', 'getTitle', 'getThemeId'])
+            ->onlyMethods(['getId', 'getData', 'setData', 'getInstanceType', 'getTitle', 'getThemeId'])
             ->getMock();
     }
 }
